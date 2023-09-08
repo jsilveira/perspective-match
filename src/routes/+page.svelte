@@ -1,29 +1,28 @@
 <script>
-  import PerspT from './PerspT.js';
+  import PerspT from '$lib/image-logic/PerspT.js';
   import Pic from './Pic.svelte';
   import {load, save} from './storage.js';
   import _ from "lodash";
-  import ImageInput from "./ImageInput.svelte";
-  import Icon from "$lib/components/Icon.svelte";
+  import ImageInput from "$lib/components/ImageInput.svelte";
   import {onDestroy} from "svelte";
+  import Btn from "$lib/components/Btn.svelte";
+  import Point from "./Point.svelte";
 
-  const distance = ([x,y],[x2,y2]) => Math.sqrt((x-x2)**2+(y-y2)**2)
+  const distance = ([x, y], [x2, y2]) => Math.sqrt((x - x2) ** 2 + (y - y2) ** 2)
 
   const worker = new Worker(new URL('./perspectiveWorker.js', import.meta.url))
 
   onDestroy(() => worker.terminate());
 
-  let samples = [
-    "/tire-pressure-label-sample.jpg",
-  ]
+  let samples = ["/tire-pressure-label-sample.jpg",]
 
   let imgA = load("sourceImg", samples[0]);
   let fullImg, error;
 
   let a, b, c, d;
-  let w,h;
-
-  // let prevOpacity = 1;
+  let cropA, cropB, cropC, cropD;
+  let cropTop = 0, cropBottom = 0, cropLeft = 0, cropRight = 0;
+  let w, h;
 
 
   let fromX, toX, fromY, toY, destWidth, destHeight;
@@ -32,46 +31,64 @@
   let forceResolution = null;
   let transformEntireImage = false;
 
-  let transformationMatrix, matrix, canvasPerspective, lastCanvas, canvasOrigin, srcData;
+  let transformationMatrix, canvasPerspective, lastCanvas, canvasOrigin, srcData;
 
   let useCssMatrix3D = false;
 
   let offscreenCanvas, lastSourceData;
   let workerBusy = false;
   let updatePending = false;
-  function updateControlPoints(a,b,c,d) {
+
+  function updateControlPoints(a, b, c, d) {
     if (fullImg && (canvasPerspective || useCssMatrix3D)) {
       save("sourcePoint" + imgA, [a, b, c, d])
       let srcWidth = fullImg.width;
       let srcHeight = fullImg.height;
-      let [p1, p2, p3, p4] = [a,b,c,d].map(([x,y]) => [x*srcWidth, y*srcHeight]);
+
+      // Transformation points
+      let [p1, p2, p3, p4] = [a, b, c, d].map(([x, y]) => [x * srcWidth, y * srcHeight]);
 
       // Compute an approximate size for the rectangle
-      let selWidth = Math.round((distance(p1, p2)+distance(p3, p4))/2);
-      let selHeight = Math.round((distance(p2, p3)+distance(p4, p1))/2);
+      let selWidth = Math.round((distance(p1, p2) + distance(p3, p4)) / 2);
+      let selHeight = Math.round((distance(p2, p3) + distance(p4, p1)) / 2);
 
       // Compute the transformation to turn the selection into the aproximate rectangle of that size
       let dstCorners = [...[0, 0], ...[selWidth, 0], ...[selWidth, selHeight], ...[0, selHeight]]
       let perspectiveTransform = new PerspT([...p1, ...p2, ...p3, ...p4], dstCorners);
       transformationMatrix = perspectiveTransform.coeffsInv;
 
-      if(transformEntireImage) {
-        let newCorners = [[0,0], [srcWidth,0], [srcWidth, srcHeight], [0, srcHeight]].map(([x,y]) => perspectiveTransform.transform(x, y))
-        fromX = Math.min(... newCorners.map(p => p[0]));
-        toX = Math.max(... newCorners.map(p => p[0]));
-        fromY = Math.min(... newCorners.map(p => p[1]));
-        toY = Math.max(... newCorners.map(p => p[1]));
+      let newCorners;
+      if (transformEntireImage) {
+        newCorners = [[0, 0], [srcWidth, 0], [srcWidth, srcHeight], [0, srcHeight]].map(([x, y]) => perspectiveTransform.transform(x, y))
       } else {
-        fromX = 0;
-        fromY = 0;
-        toX = selWidth;
-        toY = selHeight;
+        newCorners = [p1, p2, p3, p4].map(([x, y]) => perspectiveTransform.transform(x, y))
       }
+
+      fromX = Math.min(...newCorners.map(p => p[0]));
+      toX = Math.max(...newCorners.map(p => p[0]));
+      fromY = Math.min(...newCorners.map(p => p[1]));
+      toY = Math.max(...newCorners.map(p => p[1]));
 
       destWidth = toX - fromX;
       destHeight = toY - fromY;
 
-      if(forceResolution) {
+      fromX -= destWidth * cropLeft;
+      toX += destWidth * cropRight;
+
+      fromY -= destHeight * cropTop;
+      toY += destHeight * cropBottom;
+
+      destWidth = toX - fromX;
+      destHeight = toY - fromY;
+
+      [cropA, cropB, cropC, cropD] = [[fromX, fromY], [toX, fromY], [toX, toY], [fromX, toY]].map(([x, y]) => {
+        let [newX, newY] = perspectiveTransform.transformInverse(x, y);
+        return [newX/srcWidth, newY/srcHeight]
+      });
+
+      console.log(cropA, cropB, cropC, cropD);
+
+      if (forceResolution) {
         resolution = forceResolution;
       } else {
         if (destHeight > 2400 || destWidth > 2400) {
@@ -81,20 +98,20 @@
         }
       }
 
-      destWidth = destWidth*resolution;
-      destHeight = destHeight*resolution;
+      destWidth = destWidth * resolution;
+      destHeight = destHeight * resolution;
 
 
-      if (useCssMatrix3D) {
-        matrix = computeMatrix3DCss(perspectiveTransform.coeffsInv, perspectiveTransform.coeffs);
-      } else {
+      // if (useCssMatrix3D) {
+      //   matrix = computeMatrix3DCss(perspectiveTransform.coeffsInv, perspectiveTransform.coeffs);
+      // } else {
         updateNewPerspective();
-      }
+      // }
     }
   }
 
   function updateImage(url) {
-    if(url && !url?.startsWith('blob:')) {
+    if (url && !url?.startsWith('blob:')) {
       save("sourceImg", imgA);
     }
 
@@ -122,7 +139,7 @@
 
       updateControlPoints(a, b, c, d);
     }
-    image.onerror = (err) => {
+    image.onerror = () => {
       error = `Hubo un problema cargando "${imgA}"`;
     }
     image.src = imgA;
@@ -149,23 +166,8 @@
 
   $: updateImage(imgA);
 
-  function computeMatrix3DCss(coeffs, coeffsInv) {
-    let t = coeffsInv;
-
-    t = [t[0], t[3], 0, t[6],
-      t[1], t[4], 0, t[7],
-      0, 0, 1, 0,
-      t[2], t[5], 0, t[8]];
-
-    return "matrix3d(" + t.join(",") + ")";
-  }
-
-
-  let canvas;
-  const z = 0.5;
-
   const updateNewPerspective = () => {
-    if(workerBusy) {
+    if (workerBusy) {
       updatePending = true;
     } else {
       workerBusy = true;
@@ -179,10 +181,10 @@
         toY,
         resolution,
         transformationMatrix,
-        ratio: canvasOrigin.height/fullImg.height
+        ratio: canvasOrigin.height / fullImg.height
       };
 
-      if(lastSourceData !== srcData) {
+      if (lastSourceData !== srcData) {
         messageData.data = srcData;
         lastSourceData = srcData;
         console.warn("Sending source data")
@@ -200,55 +202,55 @@
     }
   };
 
-  let updateNewPerspectiveDebounced = _.debounce(updateNewPerspective, 5);
-
   function rotate() {
-    ([a,b,c,d] = [d,a,b,c]);
+    ([a, b, c, d] = [d, a, b, c]);
   }
 
   function restart() {
+    ([cropTop, cropBottom, cropLeft, cropRight] = [0,0,0,0]);
     ([a, b, c, d] = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]])
   }
 
 </script>
 
 <svelte:head>
-    <title>Perspective test</title>
+    <title>Perspective match</title>
 </svelte:head>
 
 <ImageInput onImageChange={(dataUri)=>imgA = dataUri}/>
 <div class="grid">
     <div class="bar bg-dark text-white gap-3">
 
-        Url:&nbsp;<input class="url form-control flex-grow-0" type='text' bind:value={imgA}>
+        <!--        Url:&nbsp;<input class="url form-control flex-grow-0" type='text' bind:value={imgA}>-->
 
-        <span class="btn btn-sm btn-primary text-nowrap" on:click={restart}><Icon icon="grid"/> Restart</span>
+        <Btn on:click={restart} icon="grid">Reset control points</Btn>
     </div>
 
     <div class="bar bg-dark text-white">
-            <div class="d-flex align-items-center gap-3">
-                <span class="btn btn-sm btn-primary text-nowrap" on:click={rotate}>
-                    <Icon icon="arrow-clockwise"/> Rotate
-                </span>
+        <div class="d-flex align-items-center gap-3">
+            <Btn icon="arrow-clockwise" on:click={rotate}>Rotate</Btn>
 
-                <div class="btn-group" role="group" aria-label="Basic radio toggle button group">
-                    {#each [0.5, 1, 2, 4] as res}
-                        <input type="radio" class="btn-check" name="btnradio" id={"btnradio"+res} autocomplete="off"
-                               on:click={()=> forceResolution = (forceResolution === res ? null : res)} checked={resolution == res}>
-                        <label class={"btn btn-sm btn-outline-"+(forceResolution ? 'primary' : 'secondary')} for={"btnradio"+res}>{res}X</label>
-                    {/each}
-                </div>
-
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" role="switch" id="fullImg" bind:checked={transformEntireImage}>
-                    <label class="form-check-label" for="fullImg">Entire image</label>
-                </div>
-
-
-                <div class="spinner-border" role="status" style:opacity={workerBusy || updatePending ? 1 : 0}>
-                    <span class="visually-hidden">Loading...</span>
-                </div>
+            <div class="btn-group" role="group" aria-label="Basic radio toggle button group">
+                {#each [0.5, 1, 2, 4] as res}
+                    <input type="radio" class="btn-check" name="btnradio" id={"btnradio"+res} autocomplete="off"
+                           on:click={()=> forceResolution = (forceResolution === res ? null : res)}
+                           checked={resolution == res}>
+                    <label class={"btn btn-sm btn-outline-"+(forceResolution ? 'primary' : 'secondary')}
+                           for={"btnradio"+res}>{res}X</label>
+                {/each}
             </div>
+
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="fullImg"
+                       bind:checked={transformEntireImage}>
+                <label class="form-check-label" for="fullImg">Entire image</label>
+            </div>
+
+
+            <div class="spinner-border" role="status" style:opacity={workerBusy || updatePending ? 1 : 0}>
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
     </div>
 
     <div class="input-cell">
@@ -258,17 +260,49 @@
                     <span class="badge bg-dark mr-2">{fullImg.width}x{fullImg.height}</span>
                 </div>
 
-            <Pic src={imgA} bind:a bind:b bind:c bind:d bind:w bind:h>
-                <svg class="wireframe" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+                <Pic src={imgA} bind:a bind:b bind:c bind:d bind:w bind:h>
+                    <svg class="wireframe" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
 
-                    <g fill-rule="evenodd" fill="#00000077">
-                        <path d={`M 0,0 L 0,${h} ${w},${h} ${w},0 z M ${a[0]*w},${a[1]*h} L ${[b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')} z`}/>
-                    </g>
+                        <g fill-rule="evenodd" fill="#00000077">
+                            <path d={`M 0,0 L 0,${h} ${w},${h} ${w},0 z M ${a[0]*w},${a[1]*h} L ${[b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')} z`}/>
+                        </g>
 
-                    <polygon points={[a,b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
-                             style="fill: none; stroke-width: 1px; stroke: white"/>
-                </svg>
-            </Pic>
+                        {#if !transformEntireImage && cropA && (cropBottom ||cropTop || cropLeft || cropRight)}
+                            <polygon points={[cropA,cropB,cropC,cropD].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
+                                     style="fill: none; stroke-width: 0.5px; stroke-dasharray: 5; stroke: cyan"/>
+                        {/if}
+
+                        <polygon points={[a,b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
+                                 style="fill: none; stroke-width: 0.5px; stroke: #0d6efd"/>
+                    </svg>
+
+                    {#if !transformEntireImage && cropA}
+
+                        <Point color="cyan" shape="square" p={[(cropD[0]+cropA[0])/2, (cropD[1]+cropA[1])/2]} onMove={(p, movX, movY) => {
+                          cropLeft -= movX+movY;
+                          updateControlPoints(a,b,c,d);
+                          return p
+                        }}/>
+
+                        <Point color="cyan" shape="square" p={[(cropA[0]+cropB[0])/2, (cropA[1]+cropB[1])/2]} onMove={(p, movX, movY) => {
+                          cropTop -= movX+movY;
+                          updateControlPoints(a,b,c,d);
+                          return p
+                        }}/>
+
+                        <Point color="cyan" shape="square" p={[(cropB[0]+cropC[0])/2, (cropB[1]+cropC[1])/2]} onMove={(p, movX, movY) => {
+                          cropRight += movX+movY;
+                          updateControlPoints(a,b,c,d);
+                          return p
+                        }}/>
+
+                        <Point  color="cyan" shape="square" p={[(cropC[0]+cropD[0])/2, (cropC[1]+cropD[1])/2]} onMove={(p, movX, movY) => {
+                          cropBottom += movX+movY;
+                          updateControlPoints(a,b,c,d);
+                          return p
+                        }}/>
+                    {/if}
+                </Pic>
             {:else if error}
                 <div class="alert alert-danger m-4">
                     {error}
@@ -286,123 +320,120 @@
     </div>
 
     <div class="output-cell">
-    {#if useCssMatrix3D}
-<!--            <div class="css-preview" style:width={destWidth+'px'} style:height={destHeight+'px'}>-->
-<!--                <img src={imgA} style:width={width+'px'} alt="-" class="preview" style:transform={matrix}-->
-<!--                     style:opacity={prevOpacity}/>-->
-<!--            </div>-->
-    {:else if fullImg && imgA}
-        <div class="resbadge">
-            <span class="badge bg-dark"> {Math.round(destWidth)}x{Math.round(destHeight)}</span>
-        </div>
+        {#if useCssMatrix3D}
+            <!--            <div class="css-preview" style:width={destWidth+'px'} style:height={destHeight+'px'}>-->
+            <!--                <img src={imgA} style:width={width+'px'} alt="-" class="preview" style:transform={matrix}-->
+            <!--                     style:opacity={prevOpacity}/>-->
+            <!--            </div>-->
+        {:else if fullImg && imgA}
+            <div class="resbadge">
+                <span class="badge bg-dark"> {Math.round(destWidth)}x{Math.round(destHeight)}</span>
+            </div>
 
-        <div class="canvas-preview">
-            <canvas bind:this={canvasPerspective}></canvas>
-        </div>
-    {/if}
+            <div class="canvas-preview">
+                <canvas bind:this={canvasPerspective}></canvas>
+            </div>
+        {/if}
     </div>
 </div>
 
 
 <style lang="css">
-  .grid {
-    position: fixed;
-    height: 100%;
-    width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 50px 1fr;
-    grid-column-gap: 0px;
-    grid-row-gap: 0px;
+    .grid {
+        position: fixed;
+        height: 100%;
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 50px 1fr;
+        grid-column-gap: 0px;
+        grid-row-gap: 0px;
 
-    background: url('/checkered.png');
-    background-size: 100px;
-    background-color: white;
-  }
-  .resbadge {
-    position: absolute;
-    top: 2px;
-    text-align: center;
-    left: calc(50% - 150px);
-    width:300px;
-    user-select: none;
-  }
-  .bar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 20px;
-  }
+        background: url('/checkered.png');
+        background-size: 100px;
+        background-color: white;
+    }
 
-  .wireframe {
-    position: absolute;
-    height: 100%;
-    width: 100%;
-    //mix-blend-mode: super;
-    overflow: visible;
-  }
+    .resbadge {
+        position: absolute;
+        top: 2px;
+        text-align: center;
+        left: calc(50% - 150px);
+        width: 300px;
+        user-select: none;
+    }
 
-  .output-cell {
-    background: #FFFFFFEE;
-    vertical-align: middle;
-    text-align: center;
-    padding: 30px 10px 10px 10px;
-    border-left: solid 2px black;
-    overflow: auto;
-    position: relative;
-    user-select: none;
-  }
+    .bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 20px;
+    }
 
-  .input-cell {
-    background: #FFFFFFEE;
-    //vertical-align: middle;
-    display: flex;
-    //align-items: center;
-    justify-content: center;
-    padding-top: 10px;
-    position: relative;
-    user-select: none;
-  }
+    .wireframe {
+        position: absolute;
+        height: 100%;
+        width: 100%;
+        overflow: visible;
+    }
 
-  .input-cell, .output-cell {
-    height: 100%;
-    width: 100%;
-  }
+    .output-cell {
+        background: #FFFFFFEE;
+        vertical-align: middle;
+        text-align: center;
+        padding: 30px 10px 10px 10px;
+        border-left: solid 2px black;
+        overflow: auto;
+        position: relative;
+        user-select: none;
+    }
 
-  .css-preview {
-    //width: 300px;
-    overflow: hidden;
-    //height: 300px;
-    box-shadow: 0 0 1px 1px black;
-  }
+    .input-cell {
+        background: #FFFFFFEE;
+        display: flex;
+        justify-content: center;
+        padding-top: 10px;
+        position: relative;
+        user-select: none;
+    }
 
-  .canvas-preview {
-    position: relative;
-    height: 100%;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+    .input-cell, .output-cell {
+        height: 100%;
+        width: 100%;
+    }
 
-  .canvas-preview.canvas {
-      box-shadow: 0 0 4px 4px rgba(0,0,0,0.2), 0px 0px 1px 0px rgba(0,0,0,0.5);
-      border-radius: 2px;
-      position: relative;
-      max-height: 100%;
-      max-width: 100%;
-  }
+    .css-preview {
+        overflow: hidden;
+        box-shadow: 0 0 1px 1px black;
+    }
 
-  input.url {
-    font-size: 12px;
-    width: 100%;
-  }
+    .canvas-preview {
+        position: relative;
+        height: 100%;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
 
-  .preview {
-    position: relative;
-    /*mix-blend-mode: difference;*/
-    left: 0;
-    top: 0;
-    transform-origin: top left;
-  }
+    .canvas-preview canvas {
+        box-shadow: 0 0 4px 4px rgba(0, 0, 0, 0.2), 0px 0px 1px 0px rgba(0, 0, 0, 0.5);
+        border-radius: 2px;
+        position: relative;
+        max-height: 100%;
+        max-width: 100%;
+    }
+
+    input.url {
+        font-size: 12px;
+        width: 100%;
+    }
+
+    .preview {
+        position: relative;
+        /*mix-blend-mode: difference;*/
+        left: 0;
+        top: 0;
+        transform-origin: top left;
+    }
 </style>

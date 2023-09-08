@@ -1,4 +1,4 @@
-import numeric from './numeric.js';
+import numeric from '$lib/image-logic/numeric.js';
 
 function round(num) {
   return Math.round(num * 10000000000) / 10000000000;
