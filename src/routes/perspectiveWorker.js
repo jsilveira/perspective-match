@@ -1,45 +1,88 @@
 let offscreenCanvas;
 let sourceData;
-// if (window.Worker) {
-  onmessage = (e) => {
-    let data = e.data;
-    // console.log("Message received from main script",  destWidth, destHeight, srcH, srcW, ratio);
+let activeComputationId, activeComputationPromise;
 
-    if(data.canvas) {
+// if (window.Worker) {
+onmessage = async (e) => {
+  let data = e.data;
+  // console.log("Message received from main script",  destWidth, destHeight, srcH, srcW, ratio);
+
+    let myComputationId = Math.random();
+    activeComputationId = myComputationId;
+
+    // Wait any previous computation
+    if (activeComputationPromise) {
+      console.log("%cAwaiting prev computation...", "color: gray")
+      await activeComputationPromise;
+      if(activeComputationId !== myComputationId) {
+        console.log("%cObsolete call already.", "color: red")
+        return;
+      }
+    }
+
+    if (data.canvas) {
       offscreenCanvas = data.canvas;
     }
-    if(data.data) {
+
+    if (data.data) {
       sourceData = data.data;
     }
+
+  try {
     console.time("Web worker perspective computation")
 
-    try {
-      transformCanvas({... data, srcData: sourceData, destCanvas: offscreenCanvas})
-    } catch(error) {
-      postMessage({message: 'error', description: error.toString()});
+    activeComputationPromise = transformCanvas(activeComputationId, {
+      ...data,
+      srcData: sourceData,
+      destCanvas: offscreenCanvas
+    });
+
+    const interrupted = await activeComputationPromise;
+
+    if (!interrupted) {
+      postMessage({message: 'done'});
+      activeComputationPromise = null;
+    } else {
+      console.log("%cAborted computation.", "color: red")
     }
+  } catch (error) {
+    activeComputationPromise = null;
+    postMessage({message: 'error', description: error.toString()});
+  } finally {
     console.timeEnd("Web worker perspective computation")
-  };
-// } else {
-//   console.error("Web worker was invoked outside window.worker scope")
-// }
+  }
+};
 
-
-
-function transformCanvas({srcW, srcH,srcData, fromX, toX, fromY, toY, destCanvas, transformationMatrix, resolution, ratio}) {
+async function transformCanvas(computationId, {srcW, srcH,srcData, fromX, toX, fromY, toY, destCanvas, transformationMatrix, resolution, ratio}) {
   const [c1, c2, c3, c4, c5, c6, c7, c8] = transformationMatrix;
 
-  destCanvas.width = (toX - fromX)*resolution;
-  destCanvas.height = (toY - fromY)*resolution;
+  let destH = Math.ceil((toY - fromY)*resolution)
+  let destW = Math.ceil((toX - fromX)*resolution);
 
-  let destCtx = destCanvas.getContext('2d');
+  console.log(`${destW}x${destH}`)
+  let destData;
+  try {
+    destData = new ImageData(destW, destH);
+  } catch(e) {
+    if(['IndexSizeError','RangeError'].includes(e.name)) {
+      throw new Error(`Image size ${destW}x${destH} is too large. Try changing the shape or lowering the X multiplier`)
+    } else {
+      throw e;
+    }
+  }
 
-  let destW = destCanvas.width;
+  let steps = 0;
+  for (let i = 0; i < destH; i++) {
+    for (let j = 0; j < destW; j++) {
+      // Check it should not abort
+      if((steps++) % 10000000 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
 
-  let destData = destCtx.createImageData(destW, destCanvas.height);
-
-  for (let i = 0; i < destCanvas.height; i++) {
-    for (let j = 0; j < destCanvas.width; j++) {
+        if(computationId !== activeComputationId) {
+          // true indicates the computation is aborted
+          return true;
+        }
+      }
       // Call the transformation function to get the corresponding src pixel
       const y = (i/resolution + fromY);
       const x = (j/resolution + fromX);
@@ -68,7 +111,7 @@ function transformCanvas({srcW, srcH,srcData, fromX, toX, fromY, toY, destCanvas
   }
 
   // Draw the destination imageData to the destCanvas
-  destCtx.putImageData(destData, 0, 0);
-
-  postMessage({message: 'done'});
+  destCanvas.width = destW;
+  destCanvas.height = destH;
+  destCanvas.getContext('2d').putImageData(destData, 0, 0);
 }

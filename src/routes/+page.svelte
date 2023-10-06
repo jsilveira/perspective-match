@@ -86,7 +86,7 @@
         return [newX/srcWidth, newY/srcHeight]
       });
 
-      console.log(cropA, cropB, cropC, cropD);
+      // console.log(cropA, cropB, cropC, cropD);
 
       if (forceResolution) {
         resolution = forceResolution;
@@ -150,6 +150,7 @@
     // e.data;
     if (e.data?.message === 'done') {
       workerBusy = false;
+      error = null;
       if (updatePending) {
         updatePending = false;
         updateNewPerspective();
@@ -157,6 +158,7 @@
     } else if (e.data?.message === 'error') {
       workerBusy = false;
       console.error(e.data.description);
+      error = e.data.description;
     } else {
       console.log("Message received from worker", e.data);
     }
@@ -166,10 +168,10 @@
 
   $: updateImage(imgA);
 
-  const updateNewPerspective = () => {
-    if (workerBusy) {
-      updatePending = true;
-    } else {
+  const updateNewPerspective = _.debounce(() => {
+    // if (workerBusy) {
+    //   updatePending = true;
+    // } else {
       workerBusy = true;
 
       let messageData = {
@@ -187,7 +189,7 @@
       if (lastSourceData !== srcData) {
         messageData.data = srcData;
         lastSourceData = srcData;
-        console.warn("Sending source data")
+        // console.warn("Sending source data")
       }
 
       if (!offscreenCanvas || canvasPerspective !== lastCanvas) {
@@ -199,11 +201,12 @@
       } else {
         worker.postMessage(messageData)
       }
-    }
-  };
+    // }
+  }, 3);
 
   function rotate() {
     ([a, b, c, d] = [d, a, b, c]);
+    ([cropLeft, cropTop, cropRight, cropBottom] = [cropBottom, cropLeft, cropTop, cropRight]);
   }
 
   function restart() {
@@ -261,46 +264,47 @@
                 </div>
 
                 <Pic src={imgA} bind:a bind:b bind:c bind:d bind:w bind:h>
-                    <svg class="wireframe" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+                    {#if w && h}
+                        <svg class="wireframe" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
 
-                        <g fill-rule="evenodd" fill="#00000077">
-                            <path d={`M 0,0 L 0,${h} ${w},${h} ${w},0 z M ${a[0]*w},${a[1]*h} L ${[b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')} z`}/>
-                        </g>
+                            <g fill-rule="evenodd" fill="#00000077">
+                                <path d={`M 0,0 L 0,${h} ${w},${h} ${w},0 z M ${a[0]*w},${a[1]*h} L ${[b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')} z`}/>
+                            </g>
 
-                        {#if !transformEntireImage && cropA && (cropBottom ||cropTop || cropLeft || cropRight)}
-                            <polygon points={[cropA,cropB,cropC,cropD].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
-                                     style="fill: none; stroke-width: 0.5px; stroke-dasharray: 5; stroke: cyan"/>
+                            {#if !transformEntireImage && cropA && (cropBottom ||cropTop || cropLeft || cropRight)}
+                                <polygon points={[cropA,cropB,cropC,cropD].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
+                                         style="fill: none; stroke-width: 0.5px; stroke-dasharray: 5; stroke: cyan"/>
+                            {/if}
+
+                            <polygon points={[a,b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
+                                     style="fill: none; stroke-width: 0.5px; stroke: #0d6efd"/>
+                        </svg>
+
+                        {#if !transformEntireImage && cropA}
+                            <Point color="cyan" shape="square" p={[(cropD[0]+cropA[0])/2, (cropD[1]+cropA[1])/2]} onMove={(p, movX, movY) => {
+                              cropLeft -= movX+movY;
+                              updateControlPoints(a,b,c,d);
+                              return p
+                            }}/>
+
+                            <Point color="cyan" shape="square" p={[(cropA[0]+cropB[0])/2, (cropA[1]+cropB[1])/2]} onMove={(p, movX, movY) => {
+                              cropTop -= movX+movY;
+                              updateControlPoints(a,b,c,d);
+                              return p
+                            }}/>
+
+                            <Point color="cyan" shape="square" p={[(cropB[0]+cropC[0])/2, (cropB[1]+cropC[1])/2]} onMove={(p, movX, movY) => {
+                              cropRight += movX+movY;
+                              updateControlPoints(a,b,c,d);
+                              return p
+                            }}/>
+
+                            <Point  color="cyan" shape="square" p={[(cropC[0]+cropD[0])/2, (cropC[1]+cropD[1])/2]} onMove={(p, movX, movY) => {
+                              cropBottom += movX+movY;
+                              updateControlPoints(a,b,c,d);
+                              return p
+                            }}/>
                         {/if}
-
-                        <polygon points={[a,b,c,d].map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
-                                 style="fill: none; stroke-width: 0.5px; stroke: #0d6efd"/>
-                    </svg>
-
-                    {#if !transformEntireImage && cropA}
-
-                        <Point color="cyan" shape="square" p={[(cropD[0]+cropA[0])/2, (cropD[1]+cropA[1])/2]} onMove={(p, movX, movY) => {
-                          cropLeft -= movX+movY;
-                          updateControlPoints(a,b,c,d);
-                          return p
-                        }}/>
-
-                        <Point color="cyan" shape="square" p={[(cropA[0]+cropB[0])/2, (cropA[1]+cropB[1])/2]} onMove={(p, movX, movY) => {
-                          cropTop -= movX+movY;
-                          updateControlPoints(a,b,c,d);
-                          return p
-                        }}/>
-
-                        <Point color="cyan" shape="square" p={[(cropB[0]+cropC[0])/2, (cropB[1]+cropC[1])/2]} onMove={(p, movX, movY) => {
-                          cropRight += movX+movY;
-                          updateControlPoints(a,b,c,d);
-                          return p
-                        }}/>
-
-                        <Point  color="cyan" shape="square" p={[(cropC[0]+cropD[0])/2, (cropC[1]+cropD[1])/2]} onMove={(p, movX, movY) => {
-                          cropBottom += movX+movY;
-                          updateControlPoints(a,b,c,d);
-                          return p
-                        }}/>
                     {/if}
                 </Pic>
             {:else if error}
@@ -315,11 +319,13 @@
                 Paste an image or enter the rewise url above
             </div>
         {/if}
-
-
     </div>
 
     <div class="output-cell">
+        {#if error}
+            <div class="alert alert-danger position-absolute" style="z-index: 2;">{error}</div>
+        {/if}
+
         {#if useCssMatrix3D}
             <!--            <div class="css-preview" style:width={destWidth+'px'} style:height={destHeight+'px'}>-->
             <!--                <img src={imgA} style:width={width+'px'} alt="-" class="preview" style:transform={matrix}-->
