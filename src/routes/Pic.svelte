@@ -3,9 +3,7 @@
 
   export let src, a, b, c, d, h, w, padding = 20;
 
-  let picDiv;
   let moving = false;
-  let lastHeight = h;
   const zoomFactor = 4;
   let zoom;
   $: zoom = moving ? zoomFactor : 1;
@@ -22,7 +20,6 @@
       // console.log("Scrolling", toX, toY)
     })
   } else {
-    lastHeight = h;
     left = 0;
     top = 0;
   }
@@ -49,7 +46,7 @@
     // console.log(`${imgW}x${imgH} in context ${w}x${h}`)
   }
 
-  $: imgW && imgLoaded(w,h)
+  $: imgW && imgLoaded(w,h, src)
 </script>
 
 <div
@@ -57,15 +54,14 @@
      bind:clientHeight={h}
      class:moving={moving}
      class="outer"
-     bind:this={picDiv}
 >
     <div class="viewport" style:width={imgW+'px'} style:height={imgH+'px'} style:zoom style:left style:top>
         <slot/>
 
-        <Point bind:p={a} color={"#0d6efd"} {zoom} bind:moving/>
-        <Point bind:p={b} color={"#0d6efd"} {zoom} bind:moving/>
+        <Point bind:p={a} color={"#89fd0d"} {zoom} bind:moving/>
+        <Point bind:p={b} color={"#0de9fd"} {zoom} bind:moving/>
         <Point bind:p={c} color={"#0d6efd"} {zoom} bind:moving/>
-        <Point bind:p={d} color={"#0d6efd"} {zoom} bind:moving/>
+        <Point bind:p={d} color={"#fd0db9"} {zoom} bind:moving/>
 
         <img crossorigin="anonymous" {src} on:load={imgLoaded} bind:this={imgElem} width={imgW} height={imgH} alt='asd'/>
     </div>

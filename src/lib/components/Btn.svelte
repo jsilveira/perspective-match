@@ -1,6 +1,7 @@
 <script>
   import Icon from "$lib/components/Icon.svelte";
 
+  /** @type {string | null} */
   export let icon = null;
 </script>
 

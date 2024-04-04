@@ -29,7 +29,7 @@ onmessage = async (e) => {
     }
 
   try {
-    console.time("Web worker perspective computation")
+    console.time("Worker perspective computation")
 
     activeComputationPromise = transformCanvas(activeComputationId, {
       ...data,
@@ -49,7 +49,7 @@ onmessage = async (e) => {
     activeComputationPromise = null;
     postMessage({message: 'error', description: error.toString()});
   } finally {
-    console.timeEnd("Web worker perspective computation")
+    console.timeEnd("Worker perspective computation")
   }
 };
 

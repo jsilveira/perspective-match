@@ -1,3 +1,7 @@
+/**
+ * @param {string} key
+ * @param {*} defaultValue
+ */
 export function load(key, defaultValue) {
 	let v = localStorage.getItem(key);
 	if(v) {
@@ -8,5 +12,5 @@ export function load(key, defaultValue) {
 }
 
 export function save(key, value){
-	localStorage.setItem(key, JSON.stringify(value));		
+	localStorage.setItem(key, JSON.stringify(value));
 }
