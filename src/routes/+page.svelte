@@ -1,31 +1,32 @@
 <script>
-  import PerspT from '$lib/image-logic/PerspT.js';
-  import {load, save} from './storage.js';
   import _ from 'lodash';
-  import ImageInput from "$lib/components/ImageInput.svelte";
   import {onDestroy} from "svelte";
-  import Btn from "$lib/components/Btn.svelte";
-  import PicWithPoints from "./PicWithPoints.svelte";
+
+  import {load, save} from './storage.js';
+  import {distance} from "$lib/image-logic/geometry.js"
+
+  import PerspT from '$lib/image-logic/PerspT.js';
+  import Btn from "$lib/components/common/Btn.svelte";
+  import PicWithPoints from "$lib/components/perspective/PicWithPoints.svelte";
+  import Icon from "$lib/components/common/Icon.svelte";
+  import ImageInput from "$lib/components/common/ImageInput.svelte";
+  import LetterCircle from "$lib/components/perspective/LetterCircle.svelte";
 
   /**
-   * @typedef {[number, number]} Point
-   * @typedef {{left: number, top: number, bottom: number, right: number}} Bounds
+   * @typedef {import('$lib/image-logic/geometry.js').Point}
    */
 
-  /**
-   * @param {Point} a
-   * @param {Point} b
-   */
-  const distance = ([x, y], [x2, y2]) => Math.sqrt((x - x2) ** 2 + (y - y2) ** 2)
+  const MODE_A_TO_B = 'a_to_b';
+  const MODE_STRAIGHTEN_A = 'a_straighten';
 
   const worker = new Worker(new URL('./perspectiveWorker.js', import.meta.url))
-
   onDestroy(() => worker.terminate());
 
-  let samples = ["/fuses-1.jpg", "/fuses-2.jpg", "/tire-pressure-label-sample.jpg",]
+  let mode = MODE_STRAIGHTEN_A;
 
-  let imgSrcA = load("sourceImg", samples[1]);
-  let imgSrcB = load("destImg", samples[0]);
+  let samples = ["/fuses-1.jpg", "/fuses-2.jpg", "/tire-pressure-label-sample.jpg","/tire-pressure-label-sample-2.jpg"]
+  let imgSrcA = load("sourceImg", samples[2]);
+  let imgSrcB = load("destImg", samples[3]);
 
   /** @type {null | HTMLImageElement} */
   let imageA;
@@ -34,7 +35,6 @@
 
   /** @type {null | string} */
   let error;
-
 
   /** @type Point[] */
   let boxA;
@@ -45,6 +45,7 @@
   /** @type Bounds */
   let cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
 
+  $: hasCropBox = _.some(_.values(cropBounds));
 
   let fromX, toX, fromY, toY, destWidth, destHeight;
 
@@ -80,53 +81,49 @@
       // Compute the transformation to turn the selection into the aproximate rectangle of that size
       let dstCorners = [...[0, 0], ...[selWidth, 0], ...[selWidth, selHeight], ...[0, selHeight]]
 
-      if (boxB && imageB) {
+      if (mode === MODE_A_TO_B && boxB && imageB) {
         save("destPoint" + imgSrcB, boxB)
         dstCorners = _.flatten(boxB.map(([x, y]) => [x * imageB.width, y * imageB.height]));
-
       }
 
       perspectiveTransform = new PerspT([...p1, ...p2, ...p3, ...p4], dstCorners);
       transformationMatrix = perspectiveTransform.coeffsInv;
 
-      let newCorners;
-
-      if (transformEntireImage) {
-        newCorners = [[0, 0], [srcWidth, 0], [srcWidth, srcHeight], [0, srcHeight]].map(([x, y]) => perspectiveTransform.transform(x, y))
-      } else {
-        newCorners = [p1, p2, p3, p4].map(([x, y]) => perspectiveTransform.transform(x, y))
-      }
-
-      fromX = Math.min(...newCorners.map(p => p[0]));
-      toX = Math.max(...newCorners.map(p => p[0]));
-      fromY = Math.min(...newCorners.map(p => p[1]));
-      toY = Math.max(...newCorners.map(p => p[1]));
-
-      if(boxB && imageB) {
+      if(mode === MODE_A_TO_B && boxB && imageB) {
         fromX = 0
         fromY = 0
         toX = imageB.width;
         toY = imageB.height;
+      } else {
+        let newCorners;
 
+        if (transformEntireImage) {
+          newCorners = [[0, 0], [srcWidth, 0], [srcWidth, srcHeight], [0, srcHeight]].map(([x, y]) => perspectiveTransform.transform(x, y))
+        } else {
+          newCorners = [p1, p2, p3, p4].map(([x, y]) => perspectiveTransform.transform(x, y))
+        }
+
+        fromX = Math.min(...newCorners.map(p => p[0]));
+        toX = Math.max(...newCorners.map(p => p[0]));
+        fromY = Math.min(...newCorners.map(p => p[1]));
+        toY = Math.max(...newCorners.map(p => p[1]));
+
+        destWidth = toX - fromX;
+        destHeight = toY - fromY;
+
+        if(!transformEntireImage) {
+          fromX -= destWidth * cropBounds.left;
+          toX += destWidth * cropBounds.right;
+
+          fromY -= destHeight * cropBounds.top;
+          toY += destHeight * cropBounds.bottom;
+        }
       }
 
       destWidth = toX - fromX;
       destHeight = toY - fromY;
 
-      console.log(boxA, boxB, srcWidth, srcHeight, destWidth, destHeight)
-
-      if(!transformEntireImage) {
-        fromX -= destWidth * cropBounds.left;
-        toX += destWidth * cropBounds.right;
-
-        fromY -= destHeight * cropBounds.top;
-        toY += destHeight * cropBounds.bottom;
-      }
-
-      destWidth = toX - fromX;
-      destHeight = toY - fromY;
-
-      if(transformEntireImage) {
+      if(transformEntireImage || mode === MODE_A_TO_B) {
         cropBox = null;
       } else {
         cropBox = [[fromX, fromY], [toX, fromY], [toX, toY], [fromX, toY]].map(([x, y]) => {
@@ -157,7 +154,11 @@
   function onCropBoxChange({quadrant, point, dx, dy}) {
     let [ncX, ncY] = perspectiveTransform.transform((point[0]+dx)*imageA.width, (point[1]+dy)*imageA.height);
 
+    ncX = ncX*resolution;
+    ncY = ncY*resolution;
+
     let {left, right, top, bottom} = cropBounds;
+    console.log(`CROP BOX CHANGE ${destWidth.toFixed(1)}x${destHeight.toFixed(1)}`, quadrant, dx.toFixed(3),dy.toFixed(3));
 
     switch (quadrant){
       case 'left':
@@ -174,7 +175,22 @@
         break;
     }
 
+    console.log(cropBounds)
+
     updateSourceControlPoints();
+  }
+
+
+  function updateOriginCanvas(img) {
+    const resolutionMultiplier = img.width > 1500 ? 2 : 4;
+    // const resolutionMultiplier = 1;
+    canvasOrigin = document.createElement('canvas');
+    canvasOrigin.width = img.width * resolutionMultiplier;
+    canvasOrigin.height = img.height * resolutionMultiplier;
+    console.time(`Compute source data at ${canvasOrigin.width}x${canvasOrigin.height}`)
+    canvasOrigin.getContext('2d').drawImage(img, 0, 0, canvasOrigin.width, canvasOrigin.height);
+    srcData = canvasOrigin.getContext('2d').getImageData(0, 0, canvasOrigin.width, canvasOrigin.height);
+    console.timeEnd(`Compute source data at ${canvasOrigin.width}x${canvasOrigin.height}`)
   }
 
   async function updateImage(url, localStorageId) {
@@ -188,19 +204,10 @@
       let image = new Image();
       image.crossOrigin = "anonymous";
       image.onload = function () {
-        let width = image.width;
-        let height = image.height;
-
-        const resolutionMultiplier = width > 1500 ? 2 : 4;
         // Instead of implementing bilinear filtering, we duplicate resolution of original image
         if(localStorageId === 'sourcePoint') {
-          canvasOrigin = document.createElement('canvas');
-          canvasOrigin.width = width * resolutionMultiplier;
-          canvasOrigin.height = height * resolutionMultiplier;
-          canvasOrigin.getContext('2d').drawImage(image, 0, 0, canvasOrigin.width, canvasOrigin.height);
-          srcData = canvasOrigin.getContext('2d').getImageData(0, 0, canvasOrigin.width, canvasOrigin.height);
+          updateOriginCanvas(image);
         }
-
         resolve(image);
       }
       image.onerror = () => error = `Hubo un problema cargando "${imgSrcA}"`
@@ -226,7 +233,7 @@
     }
   };
 
-  $: updateSourceControlPoints(boxA, resolution, forceResolution, transformEntireImage, boxB, imageA, imageB);
+  $: updateSourceControlPoints(boxA, resolution, forceResolution, transformEntireImage, boxB, cropBounds, imageA, imageB, mode);
 
 
   function afterLoadA(image) {
@@ -237,13 +244,10 @@
   function afterLoadB(image) {
       boxB = boxB || load("destPoint" + imgSrcB, [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]);
       imageB = image;
-      // transformEntireImage = true;
   }
 
-  $: updateImage(imgSrcA, 'sourcePoint').then(afterLoadA);
-  $: updateImage(imgSrcB, 'destPoint').then(afterLoadB);
-
-
+  $: imgSrcA && updateImage(imgSrcA, 'sourcePoint').then(afterLoadA);
+  $: imgSrcB && updateImage(imgSrcB, 'destPoint').then(afterLoadB);
 
   const computeOutputNewPerspective = _.debounce(() => {
       workerBusy = true;
@@ -267,13 +271,15 @@
       }
 
       if (!offscreenCanvas || canvasPerspective !== lastCanvas) {
+        console.time("New offscreen canvas")
         lastCanvas = canvasPerspective;
         offscreenCanvas = canvasPerspective.transferControlToOffscreen();
         messageData.canvas = offscreenCanvas;
         worker.postMessage(messageData, [offscreenCanvas])
-        console.warn("New offscreen canvas", messageData)
+        console.timeEnd("New offscreen canvas")
+        // console.warn("New offscreen canvas", messageData)
       } else {
-        console.warn("Worker request", messageData)
+        // console.warn("Worker request", messageData)
         worker.postMessage(messageData)
       }
   }, 3);
@@ -286,14 +292,19 @@
   }
 
   function restart() {
-    cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
     boxA = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+    resetCrop()
+  }
+
+  function resetCrop() {
+    cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
   }
 
   function swap() {
     [imageA, imageB] = [null, null];
     [imgSrcA, imgSrcB] = [imgSrcB, imgSrcA];
     [boxA, boxB] = [boxB, boxA]
+    // updateOriginCanvas(imageA);
   }
 
   let imgBOpacity = 0.5;
@@ -302,7 +313,6 @@
       imgBOpacity = e.offsetX/e.currentTarget.clientWidth;
     }
   }
-
 </script>
 
 <svelte:head>
@@ -310,12 +320,50 @@
 </svelte:head>
 
 
-<div class="grid" class:grid-3={imgSrcB}>
+<div class="grid" class:grid-3={mode === MODE_A_TO_B}>
+  <div class="bg-purple tabs d-flex justify-content-evenly align-items-end">
+    <div class="fs-3 mb-1" style="min-width: 50px">
+      <LetterCircle --back-color="var(--img-a)">A</LetterCircle>
+    </div>
+
+    <div class="center">
+      <ul class="nav nav-tabs">
+        <li class="nav-item">
+          <a class="nav-link" class:active-tab={mode == MODE_STRAIGHTEN_A}  on:click={() => mode = MODE_STRAIGHTEN_A}  href="javascript:void(0)">
+            Straighten <LetterCircle --back-color="var(--img-a)">A</LetterCircle>
+            <img src="/icon-img-a.png"  height="24" width="24" alt="A"/>
+            <Icon icon="arrow-right"/>
+            <img src="/icon-img-a-flat.png"  height="24" width="24" alt="B"/>
+          </a>
+        </li>
+
+        <li class="nav-item">
+          <a class="nav-link" class:active-tab={mode == MODE_A_TO_B} aria-current="page" on:click={() => mode = MODE_A_TO_B} href="javascript:void(0)">
+            Match perspective of
+            <LetterCircle --back-color="var(--img-a)">A</LetterCircle> with  <LetterCircle --back-color="var(--img-b)">B</LetterCircle>
+            <img src="/icon-img-a.png"  height="24" width="24" alt="A"/>
+            <Icon icon="arrow-right"/>
+            <img src="/icon-img-b.png"  height="24" width="24" alt="B"/>
+          </a>
+        </li>
+
+      </ul>
+    </div>
+
+    <div class="fs-3 mb-1" style="min-width: 50px">
+      {#if mode === MODE_A_TO_B}
+        <LetterCircle --back-color="var(--img-b)">B</LetterCircle>
+      {/if}
+    </div>
+  </div>
+
+
     <div class="bar bg-dark text-white gap-3">
+        <Btn on:click={restart} icon="bounding-box-circles">Reset control points</Btn>
 
-        <!--        Url:&nbsp;<input class="url form-control flex-grow-0" type='text' bind:value={imgSrcA}>-->
-
-        <Btn on:click={restart} icon="grid">Reset control points</Btn>
+        {#if cropBox && hasCropBox}
+          <Btn on:click={resetCrop} icon="textarea">Reset crop box</Btn>
+        {/if}
     </div>
 
     <div class="bar bg-dark text-white">
@@ -332,20 +380,23 @@
                 {/each}
             </div>
 
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" role="switch" id="imageA"
-                       bind:checked={transformEntireImage}>
-                <label class="form-check-label" for="imageA">Entire image</label>
-            </div>
+            {#if mode === MODE_STRAIGHTEN_A}
+              <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" role="switch" id="imageA"
+                         bind:checked={transformEntireImage}>
+                    <label class="form-check-label" for="imageA">Entire image</label>
+              </div>
+            {/if}
 
-
-            <div class="spinner-border" role="status" style:opacity={workerBusy || updatePending ? 1 : 0}>
+          <span>
+            <span class="spinner-border" role="status" style:opacity={workerBusy || updatePending ? 1 : 0}>
                 <span class="visually-hidden">Loading...</span>
-            </div>
+            </span>
+          </span>
         </div>
     </div>
 
-    {#if imgSrcB}
+    {#if mode == MODE_A_TO_B}
         <div class="bar bg-dark text-white">
           <Btn icon="arrow-left-right" on:click={swap}>Swap images</Btn>
         </div>
@@ -353,7 +404,7 @@
 
 
     <div class="input-cell">
-      <ImageInput onImageChange={(dataUri)=> imgSrcA = dataUri}/>
+      <ImageInput bind:src={imgSrcA}/>
 
       {#if imgSrcA}
           {#if imageA}
@@ -361,7 +412,7 @@
                   <span class="badge bg-dark mr-2">{imageA.width}x{imageA.height}</span>
               </div>
 
-              <PicWithPoints bind:box={boxA} bind:cropBox {onCropBoxChange} src={imgSrcA}/>
+              <PicWithPoints bind:box={boxA} bind:cropBox hideCropBox={!hasCropBox} {onCropBoxChange} src={imgSrcA}/>
           {:else if error}
               <div class="alert alert-danger m-4">
                   {error}
@@ -369,10 +420,6 @@
           {:else}
               <h3>Loading...</h3>
           {/if}
-      {:else}
-          <div class="alert alert-primary m-4">
-              Paste an image or enter the rewise url above
-          </div>
       {/if}
     </div>
 
@@ -388,40 +435,53 @@
             </div>
 
             <div class="canvas-preview">
+              {#if mode === MODE_A_TO_B && imageB && boxB}
+                <img src={imgSrcB} class="imgSrcB"/>
+                <canvas  style:opacity={imgBOpacity} bind:this={canvasPerspective}></canvas>
+              {:else}
                 <canvas bind:this={canvasPerspective}></canvas>
-
-              {#if imageB && boxB}
-                <img style:opacity={imgBOpacity} src={imgSrcB} class="imgSrcB"/>
               {/if}
             </div>
         {/if}
     </div>
 
-    <div class="second-input-cell">
-      <ImageInput onImageChange={(dataUri)=> imgSrcB = dataUri} paste={false}/>
-      {#if false}
+  {#if mode === MODE_A_TO_B}
+      <div class="second-input-cell">
+        <ImageInput bind:src={imgSrcB} paste={false}/>
+
+        {#if false}
           <div class="alert alert-danger position-absolute" style="z-index: 2;">{error}</div>
-      {/if}
+        {/if}
 
-      {#if imageB && imgSrcB && boxB}
-          <div class="resbadge">
+        {#if imgSrcB}
+          {#if imageB && boxB}
+            <div class="resbadge">
               <span class="badge bg-dark mr-2">{imageB.width}x{imageB.height}</span>
-          </div>
+            </div>
 
-          <PicWithPoints bind:box={boxB} src={imgSrcB}/>
-      {/if}
-    </div>
+            <PicWithPoints bind:box={boxB} src={imgSrcB}/>
+          {:else}
+            <h3>Loading...</h3>
+          {/if}
+        {/if}
+      </div>
+    {/if}
 </div>
 
 
 <style lang="css">
+    :root {
+        --img-a: #8b38f6;
+        --img-b: #f92967;
+    }
+
     .grid {
         position: fixed;
         height: 100%;
         width: 100%;
         display: grid;
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: 50px 1fr;
+        grid-template-rows: 50px 50px 1fr;
         grid-column-gap: 0px;
         grid-row-gap: 0px;
 
@@ -433,6 +493,18 @@
     .grid-3 {
         grid-template-columns: 1fr 1fr 1fr;
     }
+
+
+    .grid .tabs {
+        grid-column-start: 1;
+        grid-column-end: 3;
+    }
+
+    .grid.grid-3 .tabs {
+        grid-column-start: 1;
+        grid-column-end: 4;
+    }
+
 
     .resbadge {
         position: absolute;
@@ -465,7 +537,8 @@
         background: #FFFFFFEE;
         display: flex;
         justify-content: center;
-        padding-top: 10px;
+        align-items: center;
+        padding-top: 20px;
         position: relative;
         user-select: none;
     }
@@ -503,8 +576,20 @@
 
     .imgSrcB {
         position: absolute;
-        z-index: 1;
-        opacity: 0.5;
-        transition: opacity 0.1s;
+        /*z-index: 1;*/
+        /*transition: opacity 0.1s;*/
+    }
+
+    .bg-purple {
+        background: #d1c3ea;
+    }
+
+    .nav-item .active-tab.nav-link {
+        background: #212529;
+        border-color: #212529;
+        color: white;
+    }
+    .nav-item .nav-link {
+        background: rgba(255,255,255,0.5);
     }
 </style>

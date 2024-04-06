@@ -4,8 +4,8 @@ let activeComputationId, activeComputationPromise;
 
 // if (window.Worker) {
 onmessage = async (e) => {
+  // console.log("Message received from main script");
   let data = e.data;
-  // console.log("Message received from main script",  destWidth, destHeight, srcH, srcW, ratio);
 
     let myComputationId = Math.random();
     activeComputationId = myComputationId;
@@ -59,7 +59,7 @@ async function transformCanvas(computationId, {srcW, srcH,srcData, fromX, toX, f
   let destH = Math.ceil((toY - fromY)*resolution)
   let destW = Math.ceil((toX - fromX)*resolution);
 
-  console.log(`${destW}x${destH}`)
+  // console.log(`${destW}x${destH}`)
   let destData;
   try {
     destData = new ImageData(destW, destH);

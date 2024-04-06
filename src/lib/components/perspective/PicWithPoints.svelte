@@ -11,6 +11,8 @@ export let onCropBoxChange = null;
 /** @type null | Point[] */
 export let cropBox = null;
 
+export let hideCropBox = false;
+
 const avg = ([x1, y1], [x2,y2]) => [(x1+x2)/2, (y1+y2)/2];
 
 export let w, h;
@@ -25,9 +27,11 @@ export let w, h;
                 <path d={`M 0,0 L 0,${h} ${w},${h} ${w},0 z M ${box[0][0]*w},${box[0][1]*h} L ${box.slice(1).map(([x,y])=> (x*w)+','+(y*h)).join('  ')} z`}/>
             </g>
 
-            {#if cropBox && (_.some(cropBox))}
+            {#if cropBox && !hideCropBox}
+              <polygon points={cropBox.map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
+                       style="fill: none; stroke-width: 1px; stroke-dashoffset:5; stroke-dasharray: 5; stroke: #0338"/>
                 <polygon points={cropBox.map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
-                         style="fill: none; stroke-width: 0.5px; stroke-dasharray: 5; stroke: cyan"/>
+                         style="fill: none; stroke-width: 1px; stroke-dasharray: 5; stroke: #0FF8"/>
             {/if}
 
             <polygon points={box.map(([x,y])=> (x*w)+','+(y*h)).join('  ')}
