@@ -1,9 +1,9 @@
 <script>
-  import _ from 'lodash';
+  import {some, values, flatten, debounce} from 'lodash-es';
   import {onDestroy} from "svelte";
 
   import {load, save} from './storage.js';
-  import {distance} from "$lib/image-logic/geometry.js"
+  import {bboxCrop, bboxHeight, bboxPoints, bboxWidth, distance} from "$lib/image-logic/geometry.js"
 
   import PerspT from '$lib/image-logic/PerspT.js';
   import Btn from "$lib/components/common/Btn.svelte";
@@ -13,7 +13,8 @@
   import LetterCircle from "$lib/components/perspective/LetterCircle.svelte";
 
   /**
-   * @typedef {import('$lib/image-logic/geometry.js').Point}
+   * @typedef {import('$lib/types').Point} Point
+   * @typedef {import('$lib/types').Bounds} Bounds
    */
 
   const MODE_A_TO_B = 'a_to_b';
@@ -44,10 +45,16 @@
   let cropBox;
   /** @type Bounds */
   let cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
+  
+  $: hasCropBox = some(values(cropBounds));
+  
+  /** @type Bounds */
+  let outputBounds;
 
-  $: hasCropBox = _.some(_.values(cropBounds));
-
-  let fromX, toX, fromY, toY, destWidth, destHeight;
+  /** @type {number} */
+  let destWidth;
+  /** @type {number} */
+  let destHeight;
 
   let resolution = 1;
   /** @type number | null*/
@@ -55,9 +62,23 @@
 
   let transformEntireImage = false;
 
-  let transformationMatrix, canvasPerspective, lastCanvas, canvasOrigin, srcData;
+  /** @type {number[]} */
+  let transformationMatrix;
 
-  let offscreenCanvas, lastSourceData;
+  /** @type {HTMLCanvasElement} */
+  let canvasOutput;
+  /** @type {HTMLCanvasElement} */
+  let lastCanvas;
+  /** @type {HTMLCanvasElement} */
+  let canvasOrigin;
+
+  /** @type {ImageData} */
+  let srcData;
+  /** @type {ImageData} */
+  let lastSourceData;
+  /** @type {Transferable} */
+  
+  let offscreenCanvas;
   let workerBusy = false;
   let updatePending = false;
 
@@ -65,7 +86,7 @@
   let perspectiveTransform;
 
   function updateSourceControlPoints() {
-    if (imageA && canvasPerspective) {
+    if (imageA && canvasOutput) {
       save("sourcePoint" + imgSrcA, boxA)
 
       let srcWidth = imageA.width;
@@ -83,17 +104,14 @@
 
       if (mode === MODE_A_TO_B && boxB && imageB) {
         save("destPoint" + imgSrcB, boxB)
-        dstCorners = _.flatten(boxB.map(([x, y]) => [x * imageB.width, y * imageB.height]));
+        dstCorners = flatten(boxB.map(([x, y]) => [x * imageB.width, y * imageB.height]));
       }
 
       perspectiveTransform = new PerspT([...p1, ...p2, ...p3, ...p4], dstCorners);
       transformationMatrix = perspectiveTransform.coeffsInv;
 
       if(mode === MODE_A_TO_B && boxB && imageB) {
-        fromX = 0
-        fromY = 0
-        toX = imageB.width;
-        toY = imageB.height;
+        outputBounds = { bottom: imageB.height, left: 0, right: imageB.width, top: imageB.height }    
       } else {
         let newCorners;
 
@@ -103,30 +121,29 @@
           newCorners = [p1, p2, p3, p4].map(([x, y]) => perspectiveTransform.transform(x, y))
         }
 
-        fromX = Math.min(...newCorners.map(p => p[0]));
-        toX = Math.max(...newCorners.map(p => p[0]));
-        fromY = Math.min(...newCorners.map(p => p[1]));
-        toY = Math.max(...newCorners.map(p => p[1]));
+        outputBounds = {
+          left: Math.min(...newCorners.map(p => p[0])),
+          right: Math.max(...newCorners.map(p => p[0])),
+          top: Math.min(...newCorners.map(p => p[1])),
+          bottom: Math.max(...newCorners.map(p => p[1])),
+        }
+      
 
-        destWidth = toX - fromX;
-        destHeight = toY - fromY;
+        destWidth = bboxWidth(outputBounds);
+        destHeight = bboxHeight(outputBounds);
 
         if(!transformEntireImage) {
-          fromX -= destWidth * cropBounds.left;
-          toX += destWidth * cropBounds.right;
-
-          fromY -= destHeight * cropBounds.top;
-          toY += destHeight * cropBounds.bottom;
+          outputBounds = bboxCrop(outputBounds, cropBounds);    
         }
       }
 
-      destWidth = toX - fromX;
-      destHeight = toY - fromY;
+      destWidth = bboxWidth(outputBounds);
+      destHeight = bboxHeight(outputBounds);
 
       if(transformEntireImage || mode === MODE_A_TO_B) {
         cropBox = null;
       } else {
-        cropBox = [[fromX, fromY], [toX, fromY], [toX, toY], [fromX, toY]].map(([x, y]) => {
+        cropBox = bboxPoints(outputBounds).map(([x, y]) => {
           let [newX, newY] = perspectiveTransform.transformInverse(x, y);
           return [newX / srcWidth, newY / srcHeight]
         });
@@ -249,16 +266,16 @@
   $: imgSrcA && updateImage(imgSrcA, 'sourcePoint').then(afterLoadA);
   $: imgSrcB && updateImage(imgSrcB, 'destPoint').then(afterLoadB);
 
-  const computeOutputNewPerspective = _.debounce(() => {
+  const computeOutputNewPerspective = debounce(() => {
       workerBusy = true;
 
       let messageData = {
         srcH: canvasOrigin.height,
         srcW: canvasOrigin.width,
-        fromX,
-        fromY,
-        toX,
-        toY,
+        fromX: outputBounds.left,
+        fromY: outputBounds.top,
+        toX: outputBounds.right,
+        toY: outputBounds.bottom,
         resolution,
         transformationMatrix,
         ratio: canvasOrigin.height / imageA.height
@@ -270,10 +287,10 @@
         lastSourceData = srcData;
       }
 
-      if (!offscreenCanvas || canvasPerspective !== lastCanvas) {
+      if (!offscreenCanvas || canvasOutput !== lastCanvas) {
         console.time("New offscreen canvas")
-        lastCanvas = canvasPerspective;
-        offscreenCanvas = canvasPerspective.transferControlToOffscreen();
+        lastCanvas = canvasOutput;
+        offscreenCanvas = canvasOutput.transferControlToOffscreen();
         messageData.canvas = offscreenCanvas;
         worker.postMessage(messageData, [offscreenCanvas])
         console.timeEnd("New offscreen canvas")
@@ -424,6 +441,7 @@
     </div>
 
 
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="output-cell" on:mousemove={controlOpacity} on:mouseleave={() => imgBOpacity = 0.5}>
         {#if error}
             <div class="alert alert-danger position-absolute" style="z-index: 2;">{error}</div>
@@ -437,9 +455,9 @@
             <div class="canvas-preview">
               {#if mode === MODE_A_TO_B && imageB && boxB}
                 <img src={imgSrcB} class="imgSrcB"/>
-                <canvas  style:opacity={imgBOpacity} bind:this={canvasPerspective}></canvas>
+                <canvas  style:opacity={imgBOpacity} bind:this={canvasOutput}></canvas>
               {:else}
-                <canvas bind:this={canvasPerspective}></canvas>
+                <canvas bind:this={canvasOutput}></canvas>
               {/if}
             </div>
         {/if}

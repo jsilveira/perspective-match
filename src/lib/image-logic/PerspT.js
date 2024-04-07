@@ -4,6 +4,12 @@ function round(num) {
   return Math.round(num * 10000000000) / 10000000000;
 }
 
+/**
+ * @param {number[]} srcPts
+ * @param {number[]} dstPts
+ * @param {boolean} isInverse
+ * @returns {number[]}
+ */
 function getNormalizationCoefficients(srcPts, dstPts, isInverse) {
   if (isInverse) {
     const tmp = dstPts;
