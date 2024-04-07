@@ -20,7 +20,7 @@
 			let movementY = (e.movementY)/height/zoom;
 
 			if(onMove) {
-				p = onMove(p, movementX, movementY)
+				p = onMove(p, movementX, movementY) || p;
 			} else {
 				p[0] += movementX;
 				p[1] += movementY;
@@ -68,16 +68,16 @@
 
 		position: absolute;
 
-		background: rgba(255,255,255,0.1);
+		background: rgba(255,255,255,0.2);
 		user-select: none;
 		cursor: move;
-		opacity: 0.7;
+		opacity: 0.8;
 	}
 
 
 	.dot.shape-aim {
 		border: solid 2px;
-		box-shadow: 0px 0px 1px 1px rgba(255,255,255,0.5), inset 0px 0px 1px 1px rgba(0,0,0,0.5);
+		box-shadow: 0px 0px 1px 2px rgba(255,255,255,1), inset 0px 0px 1px 1px rgba(0,0,0,0.5);
 		border-radius: 50%;
 	}
 	.dot.shape-square {
