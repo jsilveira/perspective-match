@@ -1,17 +1,18 @@
 <script>
   import { onMount } from 'svelte';
 
-  export let onImageChange;
-  export let target;
+  /** @type string */
+  export let src;
+  /** @type { null | HTMLElement} */
+  export let target = null;
   export let paste = true;
 
-  let imgSrc = '';
-  let draggingOver = false;
+  // use a counter, because the children of the container element can fire the event causing enter/leave on different order
+  let draggingOver = 0;
 
   function processImageFile(file) {
     if (file && file.type.startsWith('image/')) {
-      imgSrc = window.URL.createObjectURL(file);
-      onImageChange(imgSrc);
+      src = window.URL.createObjectURL(file);
     }
   }
 
@@ -31,6 +32,7 @@
   }
 
   function onDrop(e) {
+    draggingOver = 0;
     e.preventDefault();
     if (e.dataTransfer.items) {
       for (const item of e.dataTransfer.items) {
@@ -50,15 +52,18 @@
   }
 
   function onDragEnter(e) {
-    console.log("drag enter", e.target)
-    draggingOver = true;
+    draggingOver++;
+    // console.log("drag enter", draggingOver)
+    e.stopImmediatePropagation()
+    e.preventDefault();
   }
 
   function onDragLeave(e) {
-    console.log("drag leave", e.target)
-    draggingOver = false;
+    draggingOver--;
+    // console.log("drag leave", draggingOver)
+    e.stopImmediatePropagation()
+    e.preventDefault();
   }
-
   let thisElement;
 
   onMount(() => {
@@ -67,6 +72,7 @@
     if(paste) {
       window.addEventListener('paste', onPaste);
     }
+
 
     target.addEventListener('dragover', onDragOver);
     target.addEventListener('dragenter', onDragEnter);
@@ -85,25 +91,35 @@
 
 <!--<svelte:body on:dragover={onDragOver} on:drop={onDrop}/>-->
 
-<div class:draggingOver={draggingOver} bind:this={thisElement}></div>
+<!--<svelte:body on:dragover={onGlobalDragEnter}/>-->
+
+<div class:draggingOver={draggingOver} bind:this={thisElement}>
+</div>
+
+{#if !src}
+  <slot>
+    Drag or paste an image file here
+  </slot>
+{/if}
 
 <style>
   div {
       background: red;
       position: fixed;
+      /*width: 100%;*/
+      /*height: 100%;*/
       height: 1px;
       width:1px;
-      /*display: none;*/
+      display: none;
   }
 
   div.draggingOver {
       display: block;
       width: 100%;
       height: 100%;
-      position: fixed;
-      z-index: 9999;
+      position: absolute;
       background: green;
       opacity: 0.2;
-      /*pointer-events: none;*/
+      pointer-events: none;
   }
 </style>

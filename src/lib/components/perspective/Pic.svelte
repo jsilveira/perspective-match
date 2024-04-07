@@ -1,21 +1,24 @@
 <script>
   import Point from './Point.svelte'
+  import Btn from "$lib/components/common/Btn.svelte";
 
-  export let src, a, b, c, d, h, w, padding = 20;
+  export let src, a, b, c, d, h, w, padding = 10;
 
   let moving = false;
   const zoomFactor = 4;
+  let baseZoom = 1;
   let zoom;
-  $: zoom = moving ? zoomFactor : 1;
+  $: zoom = moving ? zoomFactor*baseZoom : baseZoom;
 
   let left = 0;
   let top = 0;
 
   $: if (moving) {
+    let z = zoomFactor*baseZoom;
     let [x, y] = moving;
     setTimeout(() => {
-      left = (w - imgW)/2/zoomFactor -imgW*(x - (x / zoomFactor))+'px';
-      top = (h - imgH)/2/zoomFactor -imgH*(y - y / zoomFactor)+'px';
+      left = (w - imgW)/2/z -imgW*(x - (x / z))+'px';
+      top = (h - imgH)/2/z -imgH*(y - y / z)+'px';
       // picDiv.scrollTo(toX, toY, 0)
       // console.log("Scrolling", toX, toY)
     })
@@ -46,6 +49,22 @@
     // console.log(`${imgW}x${imgH} in context ${w}x${h}`)
   }
 
+  function onMouseWheel(e) {
+    baseZoom = baseZoom*(e.deltaY > 0 ? 1/(1-e.deltaY/2000) : (1+e.deltaY/2000))
+    if(baseZoom < 1) {
+      left = ((w - imgW*baseZoom)/2)/baseZoom+'px';
+      top = ((h - imgH*baseZoom)/2)/baseZoom+'px'
+    } else {
+
+    }
+  }
+
+  function resetZoom() {
+    baseZoom = 1;
+    left = (w - imgW)/2+'px';
+    top = (h - imgH)/2+'px';
+  }
+
   $: imgW && imgLoaded(w,h, src)
 </script>
 
@@ -65,6 +84,14 @@
 
         <img crossorigin="anonymous" {src} on:load={imgLoaded} bind:this={imgElem} width={imgW} height={imgH} alt='asd'/>
     </div>
+
+  {#if baseZoom !== 1}
+    <span class="position-absolute mb-1 end-50 bottom-0">
+      <Btn icon={baseZoom > 1 ? 'arrows-collapse' : 'arrows-expand'} on:click={resetZoom}>
+        {Math.round(baseZoom*100)}%
+      </Btn>
+    </span>
+  {/if}
 </div>
 
 <style>
