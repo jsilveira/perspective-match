@@ -26,7 +26,7 @@
   let mode = MODE_STRAIGHTEN_A;
 
   let samples = ["/fuses-1.jpg", "/fuses-2.jpg", "/tire-pressure-label-sample.jpg","/tire-pressure-label-sample-2.jpg"]
-  let imgSrcA = load("sourceImg", samples[2]);
+  let imgSrcA = load("sourceImg", samples[0]);
   let imgSrcB = load("destImg", samples[3]);
 
   /** @type {null | HTMLImageElement} */
@@ -45,9 +45,9 @@
   let cropBox;
   /** @type Bounds */
   let cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
-  
+
   $: hasCropBox = some(values(cropBounds));
-  
+
   /** @type Bounds */
   let outputBounds;
 
@@ -58,7 +58,7 @@
 
   let resolution = 1;
   /** @type number | null*/
-  let forceResolution = null;
+  let forceResolution = 1;
 
   let transformEntireImage = false;
 
@@ -77,7 +77,7 @@
   /** @type {ImageData} */
   let lastSourceData;
   /** @type {Transferable} */
-  
+
   let offscreenCanvas;
   let workerBusy = false;
   let updatePending = false;
@@ -111,7 +111,7 @@
       transformationMatrix = perspectiveTransform.coeffsInv;
 
       if(mode === MODE_A_TO_B && boxB && imageB) {
-        outputBounds = { bottom: imageB.height, left: 0, right: imageB.width, top: imageB.height }    
+        outputBounds = { bottom: imageB.height, left: 0, right: imageB.width, top: 0 }
       } else {
         let newCorners;
 
@@ -127,13 +127,12 @@
           top: Math.min(...newCorners.map(p => p[1])),
           bottom: Math.max(...newCorners.map(p => p[1])),
         }
-      
 
         destWidth = bboxWidth(outputBounds);
         destHeight = bboxHeight(outputBounds);
 
         if(!transformEntireImage) {
-          outputBounds = bboxCrop(outputBounds, cropBounds);    
+          outputBounds = bboxCrop(outputBounds, cropBounds);
         }
       }
 
@@ -198,9 +197,12 @@
   }
 
 
-  function updateOriginCanvas(img) {
+  /**
+     * @param {HTMLImageElement} img
+     */
+  function computeSourceImageData(img) {
+    // Little hack, instead of implementing bilinear filtering, we just enlarge the source image 😅
     const resolutionMultiplier = img.width > 1500 ? 2 : 4;
-    // const resolutionMultiplier = 1;
     canvasOrigin = document.createElement('canvas');
     canvasOrigin.width = img.width * resolutionMultiplier;
     canvasOrigin.height = img.height * resolutionMultiplier;
@@ -223,7 +225,7 @@
       image.onload = function () {
         // Instead of implementing bilinear filtering, we duplicate resolution of original image
         if(localStorageId === 'sourcePoint') {
-          updateOriginCanvas(image);
+          computeSourceImageData(image);
         }
         resolve(image);
       }
@@ -250,7 +252,8 @@
     }
   };
 
-  $: updateSourceControlPoints(boxA, resolution, forceResolution, transformEntireImage, boxB, cropBounds, imageA, imageB, mode);
+ // @ts-ignore
+   $: updateSourceControlPoints(boxA, resolution, forceResolution, transformEntireImage, boxB, cropBounds, imageA, imageB, mode);
 
 
   function afterLoadA(image) {
@@ -332,10 +335,10 @@
   }
 </script>
 
+
 <svelte:head>
     <title>Perspective match</title>
 </svelte:head>
-
 
 <div class="grid" class:grid-3={mode === MODE_A_TO_B}>
   <div class="bg-purple tabs d-flex justify-content-evenly align-items-end">
@@ -373,7 +376,6 @@
       {/if}
     </div>
   </div>
-
 
     <div class="bar bg-dark text-white gap-3">
         <Btn on:click={restart} icon="bounding-box-circles">Reset control points</Btn>
@@ -440,7 +442,6 @@
       {/if}
     </div>
 
-
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="output-cell" on:mousemove={controlOpacity} on:mouseleave={() => imgBOpacity = 0.5}>
         {#if error}
@@ -454,7 +455,7 @@
 
             <div class="canvas-preview">
               {#if mode === MODE_A_TO_B && imageB && boxB}
-                <img src={imgSrcB} class="imgSrcB"/>
+                <img src={imgSrcB} class="imgSrcB" alt="Source B"/>
                 <canvas  style:opacity={imgBOpacity} bind:this={canvasOutput}></canvas>
               {:else}
                 <canvas bind:this={canvasOutput}></canvas>
@@ -466,10 +467,6 @@
   {#if mode === MODE_A_TO_B}
       <div class="second-input-cell">
         <ImageInput bind:src={imgSrcB} paste={false}/>
-
-        {#if false}
-          <div class="alert alert-danger position-absolute" style="z-index: 2;">{error}</div>
-        {/if}
 
         {#if imgSrcB}
           {#if imageB && boxB}
@@ -485,7 +482,6 @@
       </div>
     {/if}
 </div>
-
 
 <style lang="css">
     :root {
