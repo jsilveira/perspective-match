@@ -1,5 +1,4 @@
 <script>
-import _ from 'lodash';
 import Point from "./Point.svelte";
 import Pic from "./Pic.svelte";
 
