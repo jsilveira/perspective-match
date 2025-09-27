@@ -1,7 +1,5 @@
-<slot/>
+<script>
+  let { children } = $props();
+</script>
 
-<style>
-  :global(body) {
-      font-family: "Roboto", sans-serif;
-  }
-</style>
+{@render children()}

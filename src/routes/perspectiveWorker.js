@@ -133,7 +133,7 @@ async function transformCanvas(computationId, {srcW, srcH,srcData, fromX, toX, f
   `;
 
   if(await eval(functionString)) {
-    console.timeEnd("Eval")
+    // console.timeEnd("Eval")
     return true;
   }
 

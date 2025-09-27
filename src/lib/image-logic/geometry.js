@@ -59,6 +59,6 @@ export function bboxPoints({left, right, top, bottom}) {
  * @param {import("$lib/types").Point} pointB 
  * @returns {import("$lib/types").Point}
  */
-function avg([x1, y1], [x2, y2]) {
+export function avg([x1, y1], [x2, y2]) {
     return [(x1 + x2) / 2, (y1 + y2) / 2];
 }
