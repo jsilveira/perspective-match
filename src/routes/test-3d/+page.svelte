@@ -2,9 +2,9 @@
     import { onMount } from "svelte";
     import * as THREE from "three";
 
-    let container;
-    let scene, camera, renderer;
-    let customQuad;
+    let container = $state();
+    let scene = $state(), camera = $state(), renderer = $state();
+    let customQuad = $state();
 
     let topleft = [50, 50, 0];
     let topright = [400, 200, 0];
@@ -21,12 +21,16 @@
         const x4 = p4[0];
         const y4 = p4[1];
 
-        const x = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) /
+        const x =
+            ((x1 * y2 - y1 * x2) * (x3 - x4) -
+                (x1 - x2) * (x3 * y4 - y3 * x4)) /
             ((x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4));
-        const y = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) /
+        const y =
+            ((x1 * y2 - y1 * x2) * (y3 - y4) -
+                (y1 - y2) * (x3 * y4 - y3 * x4)) /
             ((x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4));
 
-        return [x, y, 0];
+        return [x, y, -0];
     }
 
     // Points of the quadrilateral
@@ -35,21 +39,17 @@
         ...topright,
         ...bottomleft,
         ...bottomright,
-        ... intersection(topleft, bottomright, topright, bottomleft),
+        ...intersection(topleft, bottomright, topright, bottomleft),
     ]);
 
     let uvs = new Float32Array([
-        0.0, 0.0, 
-        1.0, 0.0, 
-        0.0, 1.0, 
-        1.0, 1.0,
-        0.5, 0.5
+        0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.5, 0.5,
     ]);
 
     onMount(() => {
         init();
         animate();
-        window.addEventListener("resize", onResize);
+        //window.addEventListener("resize", onResize);
     });
 
     function init() {
@@ -81,7 +81,7 @@
 
         // Define the geometry based on the provided points
         const geometry = new THREE.BufferGeometry();
-        geometry.setIndex([0, 1, 4, 4, 2, 0, 4, 3, 2, 4, 1,3]); // define two triangles (quad)
+        geometry.setIndex([0, 1, 4, 4, 2, 0, 4, 3, 2, 4, 1, 3]); // define two triangles (quad)
         geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
         geometry.setAttribute(
             "position",
@@ -93,8 +93,25 @@
         const texture = new THREE.TextureLoader().load(
             "https://perspective-match.vercel.app/tire-pressure-label-sample.jpg",
         );
+        const vertexShader = document.getElementById("vertexShader").innerHTML;
+        const fragmentShader =
+            document.getElementById("fragmentShader").innerHTML;
+        const uniforms = {
+            texture1: {
+                type: "t",
+                value: 0,
+                texture,
+            },
+        };
+
+        const material = new THREE.ShaderMaterial({
+            uniforms,
+            vertexShader,
+            fragmentShader,
+        });
+
         // Create the material with the texture
-        const material = new THREE.MeshBasicMaterial({ map: texture });
+        //const material = new THREE.MeshBasicMaterial({ map: texture });
         const simpleMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 
         // Create the mesh and add it to the scene
@@ -120,6 +137,33 @@
         renderer.setSize(container.clientWidth, container.clientHeight);
     }
 </script>
+
+<svelte:head>
+    <script id="vertexShader" type="x-shader/x-vertex">
+        attribute vec3 pos;
+        attribute vec3 uvq;
+
+        uniform mat4 g_matLocalToClip;
+
+        varying vec3 v_uvq;
+
+        void main() {
+            gl_Position = g_matLocalToClip * vec4(pos, 1.0);
+            v_uvq = uvq;
+        }
+    </script>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform sampler2D g_texColor;
+        varying vec3 v_uvq;
+
+        void main() {
+            vec2 uv = v_uvq.xy / v_uvq.z;
+            gl_FragColor = texture2D(g_texColor, uv);
+        }
+    </script>
+</svelte:head>
 
 <div bind:this={container}></div>
 

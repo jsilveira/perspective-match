@@ -1,20 +1,17 @@
 <script>
 import Point from "./Point.svelte";
 import Pic from "./Pic.svelte";
+import { avg } from "$lib/image-logic/geometry.js";
 
-/** @type string */
-export let src;
-/** @type Point[] */
-export let box;
-export let onCropBoxChange = null;
-/** @type null | Point[] */
-export let cropBox = null;
-
-export let hideCropBox = false;
-
-const avg = ([x1, y1], [x2,y2]) => [(x1+x2)/2, (y1+y2)/2];
-
-export let w, h;
+let { 
+  src,
+  box = $bindable(),
+  onCropBoxChange = null,
+  cropBox = null,
+  hideCropBox = false,
+  w = $bindable(),
+  h = $bindable()
+} = $props();
 
 </script>
 

@@ -1,14 +1,10 @@
 <script>
   import { onMount } from 'svelte';
 
-  /** @type string */
-  export let src;
-  /** @type { null | HTMLElement} */
-  export let target = null;
-  export let paste = true;
+  let { src = $bindable(), target = null, paste = true, children = null } = $props();
 
   // use a counter, because the children of the container element can fire the event causing enter/leave on different order
-  let draggingOver = 0;
+  let draggingOver = $state(0);
 
   function processImageFile(file) {
     if (file && file.type.startsWith('image/')) {
@@ -64,7 +60,7 @@
     e.stopImmediatePropagation()
     e.preventDefault();
   }
-  let thisElement;
+  let thisElement = $state();
 
   onMount(() => {
     target = target || thisElement.parentElement;
@@ -97,9 +93,11 @@
 </div>
 
 {#if !src}
-  <slot>
+  {#if children}
+    {@render children()}
+  {:else}
     Drag or paste an image file here
-  </slot>
+  {/if}
 {/if}
 
 <style>

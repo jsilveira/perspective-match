@@ -2,32 +2,33 @@
   import Point from './Point.svelte'
   import Btn from "$lib/components/common/Btn.svelte";
 
-  export let src, a, b, c, d, h, w, padding = 10;
+  let { src, a = $bindable(), b = $bindable(), c = $bindable(), d = $bindable(), h = $bindable(), w = $bindable(), padding = 10, children } = $props();
 
-  let moving = false;
+  let moving = $state(false);
   const zoomFactor = 4;
-  let baseZoom = 1;
-  let zoom;
-  $: zoom = moving ? zoomFactor*baseZoom : baseZoom;
+  let baseZoom = $state(1);
+  let zoom = $derived(moving ? zoomFactor*baseZoom : baseZoom);
 
-  let left = 0;
-  let top = 0;
+  let left = $state(0);
+  let top = $state(0);
 
-  $: if (moving) {
-    let z = zoomFactor*baseZoom;
-    let [x, y] = moving;
-    setTimeout(() => {
-      left = (w - imgW)/2/z -imgW*(x - (x / z))+'px';
-      top = (h - imgH)/2/z -imgH*(y - y / z)+'px';
-      // picDiv.scrollTo(toX, toY, 0)
-      // console.log("Scrolling", toX, toY)
-    })
-  } else {
-    left = 0;
-    top = 0;
-  }
+  $effect(() => {
+    if (moving) {
+      let z = zoomFactor*baseZoom;
+      let [x, y] = moving;
+      setTimeout(() => {
+        left = (w - imgW)/2/z -imgW*(x - (x / z))+'px';
+        top = (h - imgH)/2/z -imgH*(y - y / z)+'px';
+        // picDiv.scrollTo(toX, toY, 0)
+        // console.log("Scrolling", toX, toY)
+      })
+    } else {
+      left = 0;
+      top = 0;
+    }
+  });
 
-  let imgElem, imgH, imgW;
+  let imgElem = $state(), imgH = $state(), imgW = $state();
   function imgLoaded() {
     let nW = imgElem.naturalWidth;
     let nH = imgElem.naturalHeight;
@@ -65,7 +66,9 @@
     top = (h - imgH)/2+'px';
   }
 
-  $: imgW && imgLoaded(w,h, src)
+  $effect(() => {
+    if (imgW) imgLoaded(w, h, src);
+  });
 </script>
 
 <div
@@ -75,19 +78,19 @@
      class="outer"
 >
     <div class="viewport" style:width={imgW+'px'} style:height={imgH+'px'} style:zoom style:left style:top>
-        <slot/>
+        {@render children?.()}
 
         <Point bind:p={a} color={"#89fd0d"} {zoom} bind:moving/>
         <Point bind:p={b} color={"#0de9fd"} {zoom} bind:moving/>
         <Point bind:p={c} color={"#0d6efd"} {zoom} bind:moving/>
         <Point bind:p={d} color={"#fd0db9"} {zoom} bind:moving/>
 
-        <img crossorigin="anonymous" {src} on:load={imgLoaded} bind:this={imgElem} width={imgW} height={imgH} alt='asd'/>
+        <img crossorigin="anonymous" {src} onload={imgLoaded} bind:this={imgElem} width={imgW} height={imgH} alt='asd'/>
     </div>
 
   {#if baseZoom !== 1}
     <span class="position-absolute mb-1 end-50 bottom-0">
-      <Btn icon={baseZoom > 1 ? 'arrows-collapse' : 'arrows-expand'} on:click={resetZoom}>
+      <Btn icon={baseZoom > 1 ? 'arrows-collapse' : 'arrows-expand'} onclick={resetZoom}>
         {Math.round(baseZoom*100)}%
       </Btn>
     </span>

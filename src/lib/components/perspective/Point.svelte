@@ -1,8 +1,8 @@
 <script>
-	export let p, color = "gray", zoom = 1, moving = false, onMove = null, shape = "aim";
+	let { p = $bindable(), color = "gray", zoom = 1, moving = $bindable(false), onMove = null, shape = "aim" } = $props();
 
-    let element;
-	let isMoving = false;
+    let element = $state();
+	let isMoving = $state(false);
 
 	function onMouseDown(e) {
 		isMoving = true;
@@ -39,14 +39,14 @@
 			style:top={100*p[1]+'%'}
 			class:moving={isMoving}
             bind:this={element}
-			on:mousedown={onMouseDown}
+			onmousedown={onMouseDown}
 			 style:border-color={color}
 			>
 	<span class="x"></span>
 	<span class="y"></span>
 </span>
 
-<svelte:window on:mouseup={onMouseUp} on:mousemove={onMouseMove} />
+<svelte:window onmouseup={onMouseUp} onmousemove={onMouseMove} />
 
 <style>
 	:root {

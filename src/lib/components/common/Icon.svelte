@@ -1,7 +1,5 @@
 <script>
-  export let icon
-  let clazz = '';
-  export {clazz as class}
+  let { icon, class: clazz = '', ...restProps } = $props();
 </script>
 
-<i class={`bi bi-${icon} ${clazz}`} {... $$restProps}></i>
+<i class={`bi bi-${icon} ${clazz}`} {...restProps}></i>

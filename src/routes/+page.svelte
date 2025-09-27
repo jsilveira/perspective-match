@@ -21,101 +21,79 @@
   const MODE_STRAIGHTEN_A = 'a_straighten';
 
   const worker = new Worker(new URL('./perspectiveWorker.js', import.meta.url))
-  onDestroy(() => worker.terminate());
+  // onDestroy(() => worker.terminate());
 
-  let mode = MODE_STRAIGHTEN_A;
+  let mode = $state(MODE_STRAIGHTEN_A);
 
-  let samples = ["/fuses-1.jpg", "/fuses-2.jpg", "/tire-pressure-label-sample.jpg","/tire-pressure-label-sample-2.jpg"]
-  let imgSrcA = load("sourceImg", samples[0]);
-  let imgSrcB = load("destImg", samples[3]);
-
-  /** @type {null | HTMLImageElement} */
-  let imageA;
-  /** @type {null | HTMLImageElement} */
-  let imageB;
+  let samples = ["perspective-grid.png", "/fuses-1.jpg", "/fuses-2.jpg", "/tire-pressure-label-sample.jpg","/tire-pressure-label-sample-2.jpg"]
+  let imgSrcA = $state(load("sourceImg", samples[0]));
+  let imgSrcB = $state(load("destImg", samples[3]));
 
   /** @type {null | string} */
-  let error;
+  let error = $state(null);
 
-  /** @type Point[] */
-  let boxA;
-  /** @type Point[] */
-  let boxB;
-  /** @type Point[] | null */
-  let cropBox;
-  /** @type Bounds */
-  let cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
+  let configuration = $state({
+    resolution: 1,
+    forceResolution: /** @type {number | null} */ 1,
+    transformEntireImage: false,
+    imageA: /** @type {null | HTMLImageElement} */ (null),
+    imageB: /** @type {null | HTMLImageElement} */ (null),
+    boxA: /** @type {Point[] | null} */ (null),
+    boxB: /** @type {Point[] | null} */ (null),
+    cropBounds: /** @type {Bounds} */ ({left: 0, right: 0, top: 0, bottom: 0})    
+  });
+  
 
-  $: hasCropBox = some(values(cropBounds));
+  /** @type {HTMLCanvasElement | null} */
+  let canvasOutput = $state(null);
+  /** @type {HTMLCanvasElement | null} */
+  let lastCanvas = $state(null);
+  /** @type {HTMLCanvasElement | null} */
+  let canvasOrigin = $state(null);
 
-  /** @type Bounds */
-  let outputBounds;
-
-  /** @type {number} */
-  let destWidth;
-  /** @type {number} */
-  let destHeight;
-
-  let resolution = 1;
-  /** @type number | null*/
-  let forceResolution = 1;
-
-  let transformEntireImage = false;
-
-  /** @type {number[]} */
-  let transformationMatrix;
-
-  /** @type {HTMLCanvasElement} */
-  let canvasOutput;
-  /** @type {HTMLCanvasElement} */
-  let lastCanvas;
-  /** @type {HTMLCanvasElement} */
-  let canvasOrigin;
-
-  /** @type {ImageData} */
-  let srcData;
-  /** @type {ImageData} */
-  let lastSourceData;
+  /** @type {ImageData | null} */
+  let srcData = $state(null);
+  /** @type {ImageData | null} */
+  let lastSourceData = $state(null);
   /** @type {Transferable} */
 
-  let offscreenCanvas;
-  let workerBusy = false;
-  let updatePending = false;
+  let offscreenCanvas = $state();
+  let workerBusy = $state(false);
+  let updatePending = $state(false);    
 
-  /** @type PerspT */
-  let perspectiveTransform;
+  function updateSourceControlPoints(conf) {
+    if (conf.imageA) {
+      save("sourcePoint" + imgSrcA, conf.boxA)
 
-  function updateSourceControlPoints() {
-    if (imageA && canvasOutput) {
-      save("sourcePoint" + imgSrcA, boxA)
-
-      let srcWidth = imageA.width;
-      let srcHeight = imageA.height;
-
+      let srcWidth = conf.imageA.width;
+      let srcHeight = conf.imageA.height;
+      
       // Transformation points
-      let [p1, p2, p3, p4] = boxA.map(([x, y]) => [x * srcWidth, y * srcHeight]);
+      let [p1, p2, p3, p4] = conf.boxA.map(([x, y]) => [x * srcWidth, y * srcHeight]);
 
       // Compute an approximate size for the rectangle
-      let selWidth = Math.round((distance(p1, p2) + distance(p3, p4)) / 2);
-      let selHeight = Math.round((distance(p2, p3) + distance(p4, p1)) / 2);
+      let selWidth = Math.round((distance(p1, p2) + distance(p1, p2)) / 2);
+      let selHeight = Math.round((distance(p4, p1) + distance(p4, p1)) / 2);
 
       // Compute the transformation to turn the selection into the aproximate rectangle of that size
       let dstCorners = [...[0, 0], ...[selWidth, 0], ...[selWidth, selHeight], ...[0, selHeight]]
 
-      if (mode === MODE_A_TO_B && boxB && imageB) {
-        save("destPoint" + imgSrcB, boxB)
-        dstCorners = flatten(boxB.map(([x, y]) => [x * imageB.width, y * imageB.height]));
+      if (mode === MODE_A_TO_B && conf.boxB && conf.imageB) {
+        save("destPoint" + imgSrcB, conf.boxB)
+        dstCorners = flatten(conf.boxB.map(([x, y]) => [x * conf.imageB.width, y * conf.imageB.height]));
       }
+      
+      let perspectiveTransform = new PerspT([...p1, ...p2, ...p3, ...p4], dstCorners);
+      
+      let transformationMatrix = perspectiveTransform.coeffsInv;
 
-      perspectiveTransform = new PerspT([...p1, ...p2, ...p3, ...p4], dstCorners);
-      transformationMatrix = perspectiveTransform.coeffsInv;
-
-      if(mode === MODE_A_TO_B && boxB && imageB) {
-        outputBounds = { bottom: imageB.height, left: 0, right: imageB.width, top: 0 }
+      let outputBounds = null, destWidth = 0, destHeight = 0;
+      if(mode === MODE_A_TO_B && conf.boxB && conf.imageB) {
+        outputBounds = { bottom: conf.imageB.height, left: 0, right: conf.imageB.width, top: 0 }
       } else {
         let newCorners;
 
-        if (transformEntireImage) {
+        if (conf.transformEntireImage) {
           newCorners = [[0, 0], [srcWidth, 0], [srcWidth, srcHeight], [0, srcHeight]].map(([x, y]) => perspectiveTransform.transform(x, y))
         } else {
           newCorners = [p1, p2, p3, p4].map(([x, y]) => perspectiveTransform.transform(x, y))
@@ -131,15 +109,16 @@
         destWidth = bboxWidth(outputBounds);
         destHeight = bboxHeight(outputBounds);
 
-        if(!transformEntireImage) {
-          outputBounds = bboxCrop(outputBounds, cropBounds);
+        if(!conf.transformEntireImage) {
+          outputBounds = bboxCrop(outputBounds, conf.cropBounds);
         }
       }
 
       destWidth = bboxWidth(outputBounds);
       destHeight = bboxHeight(outputBounds);
 
-      if(transformEntireImage || mode === MODE_A_TO_B) {
+      let cropBox = null;
+      if(conf.transformEntireImage || mode === MODE_A_TO_B) {
         cropBox = null;
       } else {
         cropBox = bboxPoints(outputBounds).map(([x, y]) => {
@@ -150,8 +129,9 @@
 
       // console.log(cropA, cropB, cropC, cropD);
 
-      if (forceResolution) {
-        resolution = forceResolution;
+      let resolution = conf.resolution;
+      if (conf.forceResolution) {
+        resolution = conf.forceResolution;
       } else {
         if (destHeight > 2400 || destWidth > 2400) {
           resolution = 0.5
@@ -160,40 +140,51 @@
         }
       }
 
-      destWidth = destWidth * resolution;
-      destHeight = destHeight * resolution;
-
-      computeOutputNewPerspective();
+      destWidth = destWidth * conf.resolution;
+      destHeight = destHeight * conf.resolution;
+      
+      return {
+        ... conf,
+        perspectiveTransform,
+        transformationMatrix,
+        resolution,
+        cropBox,
+        destWidth,
+        destHeight,
+        outputBounds,
+      }
     }
+    return null;
   }
 
   function onCropBoxChange({quadrant, point, dx, dy}) {
-    let [ncX, ncY] = perspectiveTransform.transform((point[0]+dx)*imageA.width, (point[1]+dy)*imageA.height);
+    if(effectiveConfiguration) {
+      let {destWidth, destHeight, perspectiveTransform} = effectiveConfiguration;
+      let [ncX, ncY] = perspectiveTransform.transform((point[0]+dx)*configuration.imageA.width, (point[1]+dy)*configuration.imageA.height);
 
-    ncX = ncX*resolution;
-    ncY = ncY*resolution;
+      ncX = ncX*effectiveConfiguration.resolution;
+      ncY = ncY*effectiveConfiguration.resolution;
 
-    let {left, right, top, bottom} = cropBounds;
-    console.log(`CROP BOX CHANGE ${destWidth.toFixed(1)}x${destHeight.toFixed(1)}`, quadrant, dx.toFixed(3),dy.toFixed(3));
+      let {left, right, top, bottom} = configuration.cropBounds;
+      console.log(`CROP BOX CHANGE ${destWidth.toFixed(1)}x${destHeight.toFixed(1)}`, quadrant, dx.toFixed(3),dy.toFixed(3));
 
-    switch (quadrant){
-      case 'left':
-        cropBounds.left = Math.max(-0.9999-right,  (-ncX)/(destWidth/(1+right+left)));
-        break;
-      case 'top':
-        cropBounds.top = Math.max(-0.9999-bottom,  (-ncY)/(destHeight/(1+bottom+top)));
-        break;
-      case 'right':
-        cropBounds.right = Math.max(-0.9999-left,  (ncX)/(destWidth/(1+right+left)) - 1);
-        break;
-      case 'bottom':
-        cropBounds.bottom = Math.max(-0.9999-top,  (ncY)/(destHeight/(1+bottom+top)) - 1)
-        break;
+      switch (quadrant){
+        case 'left':
+          configuration.cropBounds.left = Math.max(-0.9999-right,  (-ncX)/(destWidth/(1+right+left)));
+          break;
+        case 'top':
+          configuration.cropBounds.top = Math.max(-0.9999-bottom,  (-ncY)/(destHeight/(1+bottom+top)));
+          break;
+        case 'right':
+          configuration.cropBounds.right = Math.max(-0.9999-left,  (ncX)/(destWidth/(1+right+left)) - 1);
+          break;
+        case 'bottom':
+          configuration.cropBounds.bottom = Math.max(-0.9999-top,  (ncY)/(destHeight/(1+bottom+top)) - 1)
+          break;
+      }
+
+        console.log(configuration.cropBounds)
     }
-
-    console.log(cropBounds)
-
-    updateSourceControlPoints();
   }
 
 
@@ -241,7 +232,7 @@
       error = null;
       if (updatePending) {
         updatePending = false;
-        computeOutputNewPerspective();
+        computeOutputNewPerspective({...configuration});
       }
     } else if (e.data?.message === 'error') {
       workerBusy = false;
@@ -252,24 +243,38 @@
     }
   };
 
- // @ts-ignore
-   $: updateSourceControlPoints(boxA, resolution, forceResolution, transformEntireImage, boxB, cropBounds, imageA, imageB, mode);
-
-
   function afterLoadA(image) {
-    boxA = boxA || load("sourcePoint" + imgSrcA, [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]);
-    imageA = image;
+    configuration.boxA = configuration.boxA || load("sourcePoint" + imgSrcA, [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]);    
+    configuration.imageA = image;
+    // console.log("afterLoadA", configuration.boxA, configuration.imageA);
   }
 
   function afterLoadB(image) {
-      boxB = boxB || load("destPoint" + imgSrcB, [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]);
-      imageB = image;
+      configuration.boxB = configuration.boxB || load("destPoint" + imgSrcB, [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]);
+      configuration.imageB = image;
+      // console.log("afterLoadB", configuration.boxB, configuration.imageB);
   }
 
-  $: imgSrcA && updateImage(imgSrcA, 'sourcePoint').then(afterLoadA);
-  $: imgSrcB && updateImage(imgSrcB, 'destPoint').then(afterLoadB);
+  $effect(() => {
+    if (imgSrcA) updateImage(imgSrcA, 'sourcePoint').then(afterLoadA);
+  });
+  
+  $effect(() => {
+    if (imgSrcB) updateImage(imgSrcB, 'destPoint').then(afterLoadB);
+  });
 
-  const computeOutputNewPerspective = debounce(() => {
+
+  const effectiveConfiguration = $derived(updateSourceControlPoints(configuration, canvasOutput));
+
+  let hasCropBox = $derived(some(values(effectiveConfiguration.cropBounds)));
+
+  $effect(() => {
+    if(effectiveConfiguration) {
+      computeOutputNewPerspective(effectiveConfiguration);
+    }    
+  })
+
+  const computeOutputNewPerspective = debounce(({outputBounds, transformationMatrix, resolution, imageA}) => {
       workerBusy = true;
 
       let messageData = {
@@ -279,8 +284,8 @@
         fromY: outputBounds.top,
         toX: outputBounds.right,
         toY: outputBounds.bottom,
-        resolution,
-        transformationMatrix,
+        resolution: resolution,
+        transformationMatrix: Array.from(transformationMatrix),
         ratio: canvasOrigin.height / imageA.height
       };
 
@@ -305,31 +310,31 @@
   }, 3);
 
   function rotate() {
-    let [a, b, c, d] = boxA;
-    boxA = [d, a, b, c];
-    let {left, right, top, bottom} = cropBounds;
-    cropBounds = {left: bottom, top: left, right: top, bottom: right};
+    let [a, b, c, d] = configuration.boxA;
+    configuration.boxA = [d, a, b, c];
+    let {left, right, top, bottom} = configuration.cropBounds;
+    configuration.cropBounds = {left: bottom, top: left, right: top, bottom: right};
   }
 
   function restart() {
-    boxA = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+    configuration.boxA = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
     resetCrop()
   }
 
   function resetCrop() {
-    cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
+    configuration.cropBounds = {left: 0, right: 0, top: 0, bottom: 0};
   }
 
   function swap() {
-    [imageA, imageB] = [null, null];
+    [configuration.imageA, configuration.imageB] = [null, null];
     [imgSrcA, imgSrcB] = [imgSrcB, imgSrcA];
-    [boxA, boxB] = [boxB, boxA]
+    [configuration.boxA, configuration.boxB] = [configuration.boxB, configuration.boxA]
     // updateOriginCanvas(imageA);
   }
 
-  let imgBOpacity = 0.5;
+  let imgBOpacity = $state(0.5);
   function controlOpacity(e) {
-    if(imageB) {
+    if(configuration.imageB) {
       imgBOpacity = e.offsetX/e.currentTarget.clientWidth;
     }
   }
@@ -349,7 +354,7 @@
     <div class="center">
       <ul class="nav nav-tabs">
         <li class="nav-item">
-          <a class="nav-link" class:active-tab={mode == MODE_STRAIGHTEN_A}  on:click={() => mode = MODE_STRAIGHTEN_A}  href="javascript:void(0)">
+          <a class="nav-link" class:active-tab={mode == MODE_STRAIGHTEN_A}  onclick={() => mode = MODE_STRAIGHTEN_A}  href="javascript:void(0)">
             Straighten <LetterCircle --back-color="var(--img-a)">A</LetterCircle>
             <img src="/icon-img-a.png"  height="24" width="24" alt="A"/>
             <Icon icon="arrow-right"/>
@@ -358,7 +363,7 @@
         </li>
 
         <li class="nav-item">
-          <a class="nav-link" class:active-tab={mode == MODE_A_TO_B} aria-current="page" on:click={() => mode = MODE_A_TO_B} href="javascript:void(0)">
+          <a class="nav-link" class:active-tab={mode == MODE_A_TO_B} aria-current="page" onclick={() => mode = MODE_A_TO_B} href="javascript:void(0)">
             Match perspective of
             <LetterCircle --back-color="var(--img-a)">A</LetterCircle> with  <LetterCircle --back-color="var(--img-b)">B</LetterCircle>
             <img src="/icon-img-a.png"  height="24" width="24" alt="A"/>
@@ -378,23 +383,23 @@
   </div>
 
     <div class="bar bg-dark text-white gap-3">
-        <Btn on:click={restart} icon="bounding-box-circles">Reset control points</Btn>
+        <Btn onclick={restart} icon="bounding-box-circles">Reset control points</Btn>
 
-        {#if cropBox && hasCropBox}
-          <Btn on:click={resetCrop} icon="textarea">Reset crop box</Btn>
+        {#if effectiveConfiguration?.cropBox && hasCropBox}
+          <Btn onclick={resetCrop} icon="textarea">Reset crop box</Btn>
         {/if}
     </div>
 
     <div class="bar bg-dark text-white">
         <div class="d-flex align-items-center gap-3">
-            <Btn icon="arrow-clockwise" on:click={rotate}>Rotate</Btn>
+            <Btn icon="arrow-clockwise" onclick={rotate}>Rotate</Btn>
 
             <div class="btn-group" role="group" aria-label="Basic radio toggle button group">
                 {#each [0.5, 1, 2, 4] as res}
                     <input type="radio" class="btn-check" name="btnradio" id={"btnradio"+res} autocomplete="off"
-                           on:click={()=> forceResolution = (forceResolution === res ? null : res)}
-                           checked={resolution == res}>
-                    <label class={"btn btn-sm btn-outline-"+(forceResolution ? 'primary' : 'secondary')}
+                           onclick={()=> configuration.forceResolution = (configuration.forceResolution === res ? null : res)}
+                           checked={configuration.resolution == res}>
+                    <label class={"btn btn-sm btn-outline-"+(configuration.forceResolution ? 'primary' : 'secondary')}
                            for={"btnradio"+res}>{res}X</label>
                 {/each}
             </div>
@@ -402,7 +407,7 @@
             {#if mode === MODE_STRAIGHTEN_A}
               <div class="form-check form-switch mb-0">
                   <input class="form-check-input" type="checkbox" role="switch" id="imageA"
-                         bind:checked={transformEntireImage}>
+                         bind:checked={configuration.transformEntireImage}>
                     <label class="form-check-label" for="imageA">Entire image</label>
               </div>
             {/if}
@@ -417,7 +422,7 @@
 
     {#if mode == MODE_A_TO_B}
         <div class="bar bg-dark text-white">
-          <Btn icon="arrow-left-right" on:click={swap}>Swap images</Btn>
+          <Btn icon="arrow-left-right" onclick={swap}>Swap images</Btn>
         </div>
     {/if}
 
@@ -426,12 +431,12 @@
       <ImageInput bind:src={imgSrcA}/>
 
       {#if imgSrcA}
-          {#if imageA}
+          {#if configuration.imageA}
               <div class="resbadge">
-                  <span class="badge bg-dark mr-2">{imageA.width}x{imageA.height}</span>
+                  <span class="badge bg-dark mr-2">{configuration.imageA.width}x{configuration.imageA.height}</span>
               </div>
 
-              <PicWithPoints bind:box={boxA} bind:cropBox hideCropBox={!hasCropBox} {onCropBoxChange} src={imgSrcA}/>
+              <PicWithPoints bind:box={configuration.boxA} cropBox={effectiveConfiguration?.cropBox} hideCropBox={!hasCropBox} {onCropBoxChange} src={imgSrcA}/>
           {:else if error}
               <div class="alert alert-danger m-4">
                   {error}
@@ -442,19 +447,19 @@
       {/if}
     </div>
 
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div class="output-cell" on:mousemove={controlOpacity} on:mouseleave={() => imgBOpacity = 0.5}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="output-cell" onmousemove={controlOpacity} onmouseleave={() => imgBOpacity = 0.5}>
         {#if error}
             <div class="alert alert-danger position-absolute" style="z-index: 2;">{error}</div>
         {/if}
 
-        {#if imageA }
+        {#if configuration.imageA}
             <div class="resbadge">
-                <span class="badge bg-dark"> {Math.round(destWidth)}x{Math.round(destHeight)}</span>
+                <span class="badge bg-dark"> {Math.round(effectiveConfiguration.destWidth)}x{Math.round(effectiveConfiguration.destHeight)}</span>
             </div>
 
             <div class="canvas-preview">
-              {#if mode === MODE_A_TO_B && imageB && boxB}
+              {#if mode === MODE_A_TO_B && configuration.imageB && configuration.boxB}
                 <img src={imgSrcB} class="imgSrcB" alt="Source B"/>
                 <canvas  style:opacity={imgBOpacity} bind:this={canvasOutput}></canvas>
               {:else}
@@ -469,12 +474,12 @@
         <ImageInput bind:src={imgSrcB} paste={false}/>
 
         {#if imgSrcB}
-          {#if imageB && boxB}
+          {#if configuration.imageB && configuration.boxB}
             <div class="resbadge">
-              <span class="badge bg-dark mr-2">{imageB.width}x{imageB.height}</span>
+              <span class="badge bg-dark mr-2">{configuration.imageB.width}x{configuration.imageB.height}</span>
             </div>
 
-            <PicWithPoints bind:box={boxB} src={imgSrcB}/>
+            <PicWithPoints bind:box={configuration.boxB} src={imgSrcB}/>
           {:else}
             <h3>Loading...</h3>
           {/if}
