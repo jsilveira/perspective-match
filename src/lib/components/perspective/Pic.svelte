@@ -64,7 +64,8 @@
     }
 
     function onMouseWheel(e) {
-        baseZoom = baseZoom * (e.deltaY > 0 ? 1 / (1 - e.deltaY / 2000) : 1 + e.deltaY / 2000);
+        const delta = -e.deltaY;
+        baseZoom = baseZoom * (delta > 0 ? 1 / (1 - delta / 2000) : 1 + delta / 2000);
         if (baseZoom < 1) {
             left = (w - imgW * baseZoom) / 2 / baseZoom + 'px';
             top = (h - imgH * baseZoom) / 2 / baseZoom + 'px';
@@ -139,7 +140,7 @@
 
 <svelte:window on:keydown={onKeyDown} on:keyup={onKeyUp} />
 
-<div bind:clientWidth={w} bind:clientHeight={h} class:moving class="outer">
+<div bind:clientWidth={w} bind:clientHeight={h} class:moving class="outer" onwheel={onMouseWheel}>
     <div
         class="viewport"
         style:width={imgW + 'px'}
