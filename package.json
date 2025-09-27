@@ -11,7 +11,7 @@
     "lint": "eslint ."
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20.19.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-auto": "^3.3.1",
