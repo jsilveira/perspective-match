@@ -90,7 +90,7 @@
         const offsetY = e.clientY - rect.top;
         lastMousePosition = [offsetX / rect.width, offsetY / rect.height];
 
-        console.log(e.clientX, rect.width, offsetX);
+        // console.log(e.clientX, rect.width, offsetX);
     }
 
     function onKeyDown(e) {

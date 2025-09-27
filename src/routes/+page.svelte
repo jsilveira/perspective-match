@@ -11,6 +11,7 @@
     import Icon from '$lib/components/common/Icon.svelte';
     import ImageInput from '$lib/components/common/ImageInput.svelte';
     import LetterCircle from '$lib/components/perspective/LetterCircle.svelte';
+    import { estimateOriginalAspectRatio } from '$lib/image-logic/aspectRatio.js';
 
     /**
      * @typedef {import('$lib/types').Point} Point
@@ -34,7 +35,8 @@
 
     let configuration = $state({
         resolution: 1,
-        forceResolution: /** @type {number | null} */ 1,
+        aspectRatio: null,
+        /** @type {number | null} */ forceResolution: /** @type {number | null} */ 1,
         transformEntireImage: false,
         imageA: /** @type {null | HTMLImageElement} */ (null),
         imageB: /** @type {null | HTMLImageElement} */ (null),
@@ -70,12 +72,21 @@
             // Transformation points
             let [p1, p2, p3, p4] = conf.boxA.map(([x, y]) => [x * srcWidth, y * srcHeight]);
 
+            let aspectRatio = conf.aspectRatio;
+            if (!aspectRatio) {
+                console.time('estimating aspect ratio');
+                aspectRatio = estimateOriginalAspectRatio(conf);
+                console.timeEnd('estimating aspect ratio');
+            }
+
             // Compute an approximate size for the rectangle
             let selWidth = Math.round((distance(p1, p2) + distance(p1, p2)) / 2);
             let selHeight = Math.round((distance(p4, p1) + distance(p4, p1)) / 2);
 
+            let d = Math.max(selWidth, selHeight);
+
             // Compute the transformation to turn the selection into the aproximate rectangle of that size
-            let dstCorners = [...[0, 0], ...[selWidth, 0], ...[selWidth, selHeight], ...[0, selHeight]];
+            let dstCorners = [...[0, 0], ...[d * aspectRatio, 0], ...[d * aspectRatio, d], ...[0, d]];
 
             if (mode === MODE_A_TO_B && conf.boxB && conf.imageB) {
                 save('destPoint' + imgSrcB, conf.boxB);
@@ -146,8 +157,8 @@
                 }
             }
 
-            destWidth = destWidth * conf.resolution;
-            destHeight = destHeight * conf.resolution;
+            destWidth = destWidth * resolution;
+            destHeight = destHeight * resolution;
 
             return {
                 ...conf,
@@ -157,7 +168,8 @@
                 cropBox,
                 destWidth,
                 destHeight,
-                outputBounds
+                outputBounds,
+                aspectRatio
             };
         }
         return null;
@@ -418,7 +430,7 @@
     </div>
 
     <div class="bar bg-dark text-white">
-        <div class="d-flex align-items-center gap-3">
+        <div class="d-flex align-items-center gap-3" style:zoom={0.8}>
             <Btn icon="arrow-clockwise" onclick={rotate}>Rotate</Btn>
 
             <div class="btn-group" role="group" aria-label="Basic radio toggle button group">
@@ -437,6 +449,19 @@
             </div>
 
             {#if mode === MODE_STRAIGHTEN_A}
+                <div class="d-flex align-items-center gap-3">
+                    Aspect:
+                    <input
+                        type="number"
+                        class="form-control form-control-sm"
+                        min="0.01"
+                        max="100"
+                        step="0.1"
+                        placeholder="{effectiveConfiguration?.aspectRatio.toFixed(2) || '-'} auto"
+                        bind:value={configuration.aspectRatio}
+                    />
+                </div>
+                
                 <div class="form-check form-switch mb-0">
                     <input class="form-check-input" type="checkbox" role="switch" id="imageA" bind:checked={configuration.transformEntireImage} />
                     <label class="form-check-label" for="imageA">Entire image</label>
