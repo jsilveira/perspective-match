@@ -1,6 +1,7 @@
 <script>
     import Point from './Point.svelte';
     import Btn from '$lib/components/common/Btn.svelte';
+    import { sortBy } from 'lodash-es';
 
     let { src, a = $bindable(), b = $bindable(), c = $bindable(), d = $bindable(), h = $bindable(), w = $bindable(), padding = 10, children } = $props();
 
@@ -13,6 +14,9 @@
     let left = $state('0px');
     let top = $state('0px');
     let fixedZoomOffset = $state(false);
+
+    let preselected = $state(null);
+    let selected = $state(null);
 
     $effect(() => {
         if (moving) {
@@ -88,9 +92,34 @@
         const rect = e.currentTarget.getBoundingClientRect();
         const offsetX = e.clientX - rect.left;
         const offsetY = e.clientY - rect.top;
-        lastMousePosition = [offsetX / rect.width, offsetY / rect.height];
+        const mx = offsetX / rect.width;
+        const my = offsetY / rect.height;
+        lastMousePosition = [mx, my];
 
-        // console.log(e.clientX, rect.width, offsetX);
+        if (e.target !== imgElem) {
+            preselected = null;
+        } else {
+            let byDistance = sortBy([a, b, c, d], ([x, y]) => Math.sqrt((x*w - mx*w) ** 2 + (y*h - my*h) ** 2));
+            preselected = byDistance[0];
+        }
+        // console.log(e.target);
+    }
+
+    function onMouseDown(e) {
+        if (preselected && e.button === 0) {
+            selected = preselected;
+            selected[0] = lastMousePosition[0];
+            selected[1] = lastMousePosition[1];
+        }
+    }
+
+    function onMouseLeave(e) {
+        selected = null;
+        preselected = null;
+    }
+
+    function onMouseUp(e) {
+        selected = null;
     }
 
     function onKeyDown(e) {
@@ -104,18 +133,47 @@
             moving = false;
         }
     }
+
+    const colors = ['#89fd0d', '#0de9fd', '#0d6efd', '#fd0db9'];
 </script>
 
 <svelte:window on:keydown={onKeyDown} on:keyup={onKeyUp} />
 
 <div bind:clientWidth={w} bind:clientHeight={h} class:moving class="outer">
-    <div class="viewport" style:width={imgW + 'px'} style:height={imgH + 'px'} style:zoom style:left style:top onmousemove={onMouseMove}>
+    <div
+        class="viewport"
+        style:width={imgW + 'px'}
+        style:height={imgH + 'px'}
+        style:zoom
+        style:left
+        style:top
+        onmousemove={onMouseMove}
+        onmousedown={onMouseDown}
+        onmouseup={onMouseUp}
+        onmouseleave={onMouseLeave}
+        role="button"
+        tabindex="0"
+    >
         {@render children?.()}
 
-        <Point bind:p={a} color={'#89fd0d'} {zoom} />
-        <Point bind:p={b} color={'#0de9fd'} {zoom} />
-        <Point bind:p={c} color={'#0d6efd'} {zoom} />
-        <Point bind:p={d} color={'#fd0db9'} {zoom} />
+        <Point bind:p={a} color={colors[0]} {zoom} hovered={preselected === a} selected={selected === a} />
+        <Point bind:p={b} color={colors[1]} {zoom} hovered={preselected === b} selected={selected === b} />
+        <Point bind:p={c} color={colors[2]} {zoom} hovered={preselected === c} selected={selected === c} />
+        <Point bind:p={d} color={colors[3]} {zoom} hovered={preselected === d} selected={selected === d} />
+
+        {#if preselected && w && h}
+            {@const box = [a, b, c, d]}
+            {@const selIndex = box.indexOf(preselected)}
+            <svg class="wireframe" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+                <polyline
+                    points={[box[(selIndex - 1 + box.length) % box.length], lastMousePosition, box[(selIndex + 1) % box.length]]
+                        .map(([x, y]) => x * w + ',' + y * h)
+                        .join('  ')}
+                    vector-effect="non-scaling-stroke"
+                    style={"fill: none; stroke-width: 0.5px; stroke: "+colors[selIndex]}
+                />
+            </svg>
+        {/if}
 
         <img crossorigin="anonymous" {src} onload={imgLoaded} bind:this={imgElem} width={imgW} height={imgH} alt="asd" />
     </div>
@@ -156,6 +214,16 @@
         border-width: 0.25px;
     }
 
+    .wireframe {
+        position: absolute;
+        height: 100%;
+        width: 100%;
+        overflow: visible;
+        z-index: 1000;
+        pointer-events: none;
+        user-select: none;
+    }
+
     img {
         /*width: 60px;*/
         width: 100%;
@@ -167,6 +235,7 @@
         -moz-user-select: none;
         -o-user-select: none;
         user-select: none;
+        user-drag: none;
         box-shadow:
             0 0 4px 4px rgba(0, 0, 0, 0.2),
             0px 0px 1px 0px rgba(0, 0, 0, 0.5);

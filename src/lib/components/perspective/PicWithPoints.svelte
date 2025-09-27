@@ -76,5 +76,7 @@
         height: 100%;
         width: 100%;
         overflow: visible;
+        pointer-events: none;
+        user-select: none;
     }
 </style>

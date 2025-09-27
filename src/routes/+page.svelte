@@ -83,7 +83,7 @@
             let selWidth = Math.round((distance(p1, p2) + distance(p1, p2)) / 2);
             let selHeight = Math.round((distance(p4, p1) + distance(p4, p1)) / 2);
 
-            let d = Math.max(selWidth, selHeight);
+            let d = (selWidth+selHeight)/2;
 
             // Compute the transformation to turn the selection into the aproximate rectangle of that size
             let dstCorners = [...[0, 0], ...[d * aspectRatio, 0], ...[d * aspectRatio, d], ...[0, d]];

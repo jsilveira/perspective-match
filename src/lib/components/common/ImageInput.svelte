@@ -13,7 +13,7 @@
     }
 
     function onPaste(e) {
-        if (e.clipboardData) {
+        if (paste && e.clipboardData) {
             const items = e.clipboardData.items;
             if (items) {
                 for (const item of items) {
@@ -64,29 +64,10 @@
 
     onMount(() => {
         target = target || thisElement.parentElement;
-
-        if (paste) {
-            window.addEventListener('paste', onPaste);
-        }
-
-        target.addEventListener('dragover', onDragOver);
-        target.addEventListener('dragenter', onDragEnter);
-        target.addEventListener('dragleave', onDragLeave);
-        target.addEventListener('drop', onDrop);
-        return () => {
-            window.removeEventListener('paste', onPaste);
-
-            target.removeEventListener('dragover', onDragOver);
-            target.removeEventListener('dragenter', onDragEnter);
-            target.removeEventListener('dragleave', onDragLeave);
-            target.removeEventListener('drop', onDrop);
-        };
     });
 </script>
 
-<!--<svelte:body ondragover={onDragOver} ondrop={onDrop}/>-->
-
-<!--<svelte:body ondragover={onGlobalDragEnter}/>-->
+<svelte:window onpaste={onPaste} ondragover={onDragOver} ondrop={onDrop} ondragenter={onDragEnter} ondragleave={onDragLeave}/>
 
 <div class:draggingOver bind:this={thisElement}></div>
 

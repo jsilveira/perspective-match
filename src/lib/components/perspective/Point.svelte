@@ -1,15 +1,22 @@
 <script>
-    let { p = $bindable(), color = 'gray', zoom = 1, onMove = null, shape = 'aim' } = $props();
+    let { p = $bindable(), color = 'gray', zoom = 1, onMove = null, shape = 'aim', selected = false, hovered = false } = $props();
 
     let element = $state();
     let isMoving = $state(false);
 
-    function onMouseDown(e) {
-        isMoving = true;
+    function onMouseDown(e) {        
+        if (e.button === 0) {
+            isMoving = true;
+            element.setPointerCapture(e.pointerId);
+            e.preventDefault();
+            e.stopPropagation();
+        }
     }
 
     function onMouseMove(e) {
-        if (isMoving) {
+        if (isMoving || selected) {
+            e.currentTarget.setPointerCapture(e.pointerId);
+
             // As a percentage of the parent
             let { width, height } = element.parentElement.getBoundingClientRect();
 
@@ -17,6 +24,11 @@
             let movementY = e.movementY / height;
 
             if (onMove) {
+                // e.stopPropagation();
+                // e.preventDefault();
+
+                console.log('onMove', p);
+
                 p = onMove(p, movementX, movementY) || p;
             } else {
                 p[0] += movementX;
@@ -25,25 +37,29 @@
         }
     }
 
-    function onMouseUp() {
-        isMoving = false;
+    function onMouseUp(e) {
+        if (isMoving) {
+            isMoving = false;
+            element.releasePointerCapture(e.pointerId);
+        }
     }
 </script>
 
 <span
     class={'dot shape-' + shape}
+    class:selected={hovered}
     style:left={100 * p[0] + '%'}
     style:top={100 * p[1] + '%'}
     class:moving={isMoving}
     bind:this={element}
-    onmousedown={onMouseDown}
+    onpointerdown={onMouseDown}
+    onpointerup={onMouseUp}
+    onpointermove={onMouseMove}
     style:border-color={color}
 >
     <span class="x"></span>
     <span class="y"></span>
 </span>
-
-<svelte:window onmouseup={onMouseUp} onmousemove={onMouseMove} />
 
 <style>
     :root {
@@ -62,35 +78,40 @@
         width: var(--size);
         margin-left: calc(-1 * var(--size) / 2);
         margin-top: calc(-1 * var(--size) / 2);
-
         position: absolute;
-
         background: rgba(255, 255, 255, 0.2);
         user-select: none;
         cursor: move;
         opacity: 0.8;
-    }
 
-    .dot.shape-aim {
-        border: solid 2px;
-        box-shadow:
-            0px 0px 1px 2px rgba(255, 255, 255, 1),
-            inset 0px 0px 1px 1px rgba(0, 0, 0, 0.5);
-        border-radius: 50%;
-    }
-    .dot.shape-square {
-        border: solid 1px;
-        box-shadow:
-            0px 0px 1px 1px rgba(255, 255, 255, 0.5),
-            inset 0px 0px 1px 1px rgba(0, 0, 0, 0.5);
-    }
+        &.shape-aim {
+            border: solid 2px;
+            box-shadow:
+                0px 0px 1px 2px rgba(255, 255, 255, 1),
+                inset 0px 0px 1px 1px rgba(0, 0, 0, 0.5);
+            border-radius: 50%;
+        }
 
-    .dot:hover {
-        opacity: 1;
-    }
-    .dot.moving {
-        opacity: 1;
-        background: none;
+        &.shape-square {
+            border: solid 1px;
+            box-shadow:
+                0px 0px 1px 1px rgba(255, 255, 255, 0.5),
+                inset 0px 0px 1px 1px rgba(0, 0, 0, 0.5);
+        }
+
+        &:hover {
+            opacity: 1;
+        }
+
+        &.moving {
+            opacity: 1;
+            background: none;
+        }
+
+        &.selected {
+            opacity: 1;
+            box-shadow: 0 0 5px 2px white;
+        }
     }
 
     .x {
