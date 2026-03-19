@@ -11,7 +11,7 @@
     import Icon from '$lib/components/common/Icon.svelte';
     import ImageInput from '$lib/components/common/ImageInput.svelte';
     import LetterCircle from '$lib/components/perspective/LetterCircle.svelte';
-    import { estimateOriginalAspectRatio } from '$lib/image-logic/aspectRatio.js';
+    import { estimateOriginalAspectRatio, estimateSideLengthAspectRatio } from '$lib/image-logic/aspectRatio.js';
 
     /**
      * @typedef {import('$lib/types').Point} Point
@@ -42,7 +42,8 @@
         imageB: /** @type {null | HTMLImageElement} */ (null),
         boxA: /** @type {Point[] | null} */ (null),
         boxB: /** @type {Point[] | null} */ (null),
-        cropBounds: /** @type {Bounds} */ ({ left: 0, right: 0, top: 0, bottom: 0 })
+        cropBounds: /** @type {Bounds} */ ({ left: 0, right: 0, top: 0, bottom: 0 }),
+        aspectRatioMethod: /** @type {'auto' | 'length' | 'perspective'} */ ('perspective')
     });
 
     /** @type {HTMLCanvasElement | null} */
@@ -75,7 +76,13 @@
             let aspectRatio = conf.aspectRatio;
             if (!aspectRatio) {
                 console.time('estimating aspect ratio');
-                aspectRatio = estimateOriginalAspectRatio(conf);
+                if (conf.aspectRatioMethod === 'length') {
+                    aspectRatio = estimateSideLengthAspectRatio(conf);
+                } else if (conf.aspectRatioMethod === 'perspective') {
+                    aspectRatio = estimateOriginalAspectRatio(conf, 1);
+                } else {
+                    aspectRatio = estimateOriginalAspectRatio(conf);
+                }
                 console.timeEnd('estimating aspect ratio');
             }
 
@@ -434,7 +441,7 @@
             <Btn icon="arrow-clockwise" onclick={rotate}>Rotate</Btn>
 
             <div class="btn-group" role="group" aria-label="Basic radio toggle button group">
-                {#each [0.5, 1, 2, 4] as res}
+                {#each [0.25, 0.5, 1, 2, 4] as res}
                     <input
                         type="radio"
                         class="btn-check"
@@ -451,13 +458,18 @@
             {#if mode === MODE_STRAIGHTEN_A}
                 <div class="d-flex align-items-center gap-3">
                     Aspect:
+                    <select class="form-select form-select-sm" style="width: auto;" bind:value={configuration.aspectRatioMethod}>
+                        <option value="auto">Auto</option>
+                        <option value="length">Side length</option>
+                        <option value="perspective">Perspective</option>
+                    </select>
                     <input
                         type="number"
                         class="form-control form-control-sm"
                         min="0.01"
                         max="100"
                         step="0.1"
-                        placeholder="{effectiveConfiguration?.aspectRatio.toFixed(2) || '-'} auto"
+                        placeholder="{effectiveConfiguration?.aspectRatio.toFixed(2) || '-'} {configuration.aspectRatioMethod}"
                         bind:value={configuration.aspectRatio}
                     />
                 </div>

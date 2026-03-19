@@ -100,8 +100,15 @@
         if (e.target !== imgElem) {
             preselected = null;
         } else {
-            let byDistance = sortBy([a, b, c, d], ([x, y]) => Math.sqrt((x*w - mx*w) ** 2 + (y*h - my*h) ** 2));
-            preselected = byDistance[0];
+            const rect = e.currentTarget.getBoundingClientRect();
+            const HIT_RADIUS_PX = 4000;
+            const hitRadius = HIT_RADIUS_PX / Math.min(rect.width, rect.height);
+
+            let byDistance = sortBy(
+                [a, b, c, d].map(p => ({ p, dist: Math.hypot(p[0] - mx, p[1] - my) })),
+                'dist'
+            );
+            preselected = byDistance[0].dist < hitRadius ? byDistance[0].p : null;
         }
         // console.log(e.target);
     }

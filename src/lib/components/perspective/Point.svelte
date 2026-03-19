@@ -68,6 +68,7 @@
 
     .shape-square {
         --size: 10px;
+        --hit-size: 100px;
     }
 
     .dot {
@@ -85,6 +86,7 @@
         opacity: 0.8;
 
         &.shape-aim {
+            z-index: 10;
             border: solid 2px;
             box-shadow:
                 0px 0px 1px 2px rgba(255, 255, 255, 1),
@@ -93,10 +95,36 @@
         }
 
         &.shape-square {
-            border: solid 1px;
-            box-shadow:
-                0px 0px 1px 1px rgba(255, 255, 255, 0.5),
-                inset 0px 0px 1px 1px rgba(0, 0, 0, 0.5);
+            /* Visual size stays small, but hit area is large */
+            z-index: 5;
+            --size: var(--hit-size);
+            background: none;
+            border: none;
+            box-shadow: none;
+
+            /* Inner visible square */
+            &::after {
+                content: '';
+                position: absolute;
+                width: 10px;
+                height: 10px;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                border: solid 1px;
+                border-color: inherit;
+                background: rgba(255, 255, 255, 0.2);
+                box-shadow:
+                    0px 0px 1px 1px rgba(255, 255, 255, 0.5),
+                    inset 0px 0px 1px 1px rgba(0, 0, 0, 0.5);
+                pointer-events: none;
+                transition: transform 0.15s, box-shadow 0.15s;
+            }
+
+            &:hover::after, &.moving::after {
+                transform: translate(-50%, -50%) scale(1.4);
+                box-shadow: 0 0 8px 3px rgba(0, 255, 255, 0.5);
+            }
         }
 
         &:hover {
