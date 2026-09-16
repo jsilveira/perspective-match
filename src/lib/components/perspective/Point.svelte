@@ -1,11 +1,12 @@
 <script>
-    let { p = $bindable(), color = 'gray', zoom = 1, onMove = null, shape = 'aim', selected = false, hovered = false } = $props();
+    let { p = $bindable(), color = 'gray', zoom = 1, onMove = null, onPress = null, shape = 'aim', selected = false, hovered = false } = $props();
 
     let element = $state();
     let isMoving = $state(false);
 
     function onMouseDown(e) {        
         if (e.button === 0) {
+            if (onPress) onPress();
             isMoving = true;
             element.setPointerCapture(e.pointerId);
             e.preventDefault();

@@ -12,6 +12,8 @@
     import ImageInput from '$lib/components/common/ImageInput.svelte';
     import LetterCircle from '$lib/components/perspective/LetterCircle.svelte';
     import { estimateOriginalAspectRatio, estimateSideLengthAspectRatio } from '$lib/image-logic/aspectRatio.js';
+    import { orthogonalize, HomographyT } from '$lib/image-logic/orthogonalize.js';
+    import PicWithSegments from '$lib/components/perspective/PicWithSegments.svelte';
 
     /**
      * @typedef {import('$lib/types').Point} Point
@@ -20,6 +22,7 @@
 
     const MODE_A_TO_B = 'a_to_b';
     const MODE_STRAIGHTEN_A = 'a_straighten';
+    const MODE_ORTHO_A = 'a_ortho';
 
     const worker = new Worker(new URL('./perspectiveWorker.js', import.meta.url));
     // onDestroy(() => worker.terminate());
@@ -43,7 +46,11 @@
         boxA: /** @type {Point[] | null} */ (null),
         boxB: /** @type {Point[] | null} */ (null),
         cropBounds: /** @type {Bounds} */ ({ left: 0, right: 0, top: 0, bottom: 0 }),
-        aspectRatioMethod: /** @type {'auto' | 'length' | 'perspective'} */ ('perspective')
+        aspectRatioMethod: /** @type {'auto' | 'length' | 'perspective'} */ ('perspective'),
+        // Orthogonalize mode
+        segments: /** @type {import('$lib/image-logic/orthogonalize.js').Segment[]} */ ([]),
+        orthoRotation: 0,
+        orthoAspectRatio: /** @type {number | null} */ (null)
     });
 
     /** @type {HTMLCanvasElement | null} */
@@ -63,7 +70,106 @@
     let workerBusy = $state(false);
     let updatePending = $state(false);
 
+    /**
+     * Orthogonalize mode: find the homography that makes every user segment horizontal or vertical
+     * and derive the output region from it.
+     */
+    function computeOrthoConfiguration(conf) {
+        if (!conf.imageA) return null;
+
+        const srcWidth = conf.imageA.width;
+        const srcHeight = conf.imageA.height;
+        const segments = conf.segments || [];
+
+        const ortho = orthogonalize(segments, srcWidth, srcHeight, {
+            aspectRatio: conf.orthoAspectRatio,
+            rotation: conf.orthoRotation
+        });
+        let perspectiveTransform = new HomographyT(ortho.H, ortho.Hinv);
+
+        const bboxOf = (points) => ({
+            left: Math.min(...points.map((p) => p[0])),
+            right: Math.max(...points.map((p) => p[0])),
+            top: Math.min(...points.map((p) => p[1])),
+            bottom: Math.max(...points.map((p) => p[1]))
+        });
+
+        // Base region: the transformed segments with some margin around them (or the whole image
+        // when there are no segments yet)
+        let outputBounds;
+        if (segments.length > 0) {
+            const transformed = segments.flatMap((seg) => [seg.p, seg.q]).map(([x, y]) => perspectiveTransform.transform(x * srcWidth, y * srcHeight));
+            outputBounds = bboxOf(transformed);
+            const margin = 0.15 * Math.max(bboxWidth(outputBounds), bboxHeight(outputBounds), 0.2 * Math.min(srcWidth, srcHeight));
+            outputBounds = { left: outputBounds.left - margin, right: outputBounds.right + margin, top: outputBounds.top - margin, bottom: outputBounds.bottom + margin };
+        } else {
+            const corners = [
+                [0, 0],
+                [srcWidth, 0],
+                [srcWidth, srcHeight],
+                [0, srcHeight]
+            ].map(([x, y]) => perspectiveTransform.transform(x, y));
+            outputBounds = bboxOf(corners);
+        }
+
+        // Shift the output so the base region starts at (0, 0): the crop box handles
+        // (onCropBoxChange) measure their ratios from the origin, like the straighten tab does.
+        perspectiveTransform = perspectiveTransform.translated(-outputBounds.left, -outputBounds.top);
+        outputBounds = { left: 0, top: 0, right: bboxWidth(outputBounds), bottom: bboxHeight(outputBounds) };
+
+        if (conf.transformEntireImage) {
+            // Transformed image corners, clamped so that a corner close to the horizon does not
+            // produce a gigantic (or infinite) output
+            const limitW = 3 * bboxWidth(outputBounds),
+                limitH = 3 * bboxHeight(outputBounds);
+            const cx = (outputBounds.left + outputBounds.right) / 2,
+                cy = (outputBounds.top + outputBounds.bottom) / 2;
+            const clamp = (v, lo, hi) => (isFinite(v) ? Math.min(hi, Math.max(lo, v)) : hi);
+            const corners = [
+                [0, 0],
+                [srcWidth, 0],
+                [srcWidth, srcHeight],
+                [0, srcHeight]
+            ]
+                .map(([x, y]) => perspectiveTransform.transform(x, y))
+                .map(([x, y]) => [clamp(x, cx - limitW, cx + limitW), clamp(y, cy - limitH, cy + limitH)]);
+            outputBounds = bboxOf([...corners, ...bboxPoints(outputBounds)]);
+        } else {
+            outputBounds = bboxCrop(outputBounds, conf.cropBounds);
+        }
+
+        let destWidth = bboxWidth(outputBounds);
+        let destHeight = bboxHeight(outputBounds);
+
+        const cropBox = conf.transformEntireImage
+            ? null
+            : bboxPoints(outputBounds).map(([x, y]) => {
+                  const [newX, newY] = perspectiveTransform.transformInverse(x, y);
+                  return [newX / srcWidth, newY / srcHeight];
+              });
+
+        let resolution = conf.forceResolution ? conf.forceResolution : destHeight > 2400 || destWidth > 2400 ? 0.5 : 1;
+        destWidth *= resolution;
+        destHeight *= resolution;
+
+        return {
+            ...conf,
+            perspectiveTransform,
+            transformationMatrix: perspectiveTransform.coeffsInv,
+            resolution,
+            cropBox,
+            destWidth,
+            destHeight,
+            outputBounds,
+            aspectRatio: ortho.aspectRatio,
+            ortho
+        };
+    }
+
     function updateSourceControlPoints(conf) {
+        if (mode === MODE_ORTHO_A) {
+            return computeOrthoConfiguration(conf);
+        }
         if (conf.imageA) {
             save('sourcePoint' + imgSrcA, conf.boxA);
 
@@ -276,9 +382,16 @@
                 [0.9, 0.9],
                 [0.1, 0.9]
             ]);
+        configuration.segments = load('segments' + imgSrcA, []);
         configuration.imageA = image;
         // console.log("afterLoadA", configuration.boxA, configuration.imageA);
     }
+
+    $effect(() => {
+        if (configuration.imageA && imgSrcA && !imgSrcA.startsWith('blob:')) {
+            save('segments' + imgSrcA, configuration.segments);
+        }
+    });
 
     function afterLoadB(image) {
         configuration.boxB =
@@ -347,6 +460,11 @@
     }, 3);
 
     function rotate() {
+        if (mode === MODE_ORTHO_A) {
+            configuration.orthoRotation = (configuration.orthoRotation + 1) % 4;
+            resetCrop();
+            return;
+        }
         let [a, b, c, d] = configuration.boxA;
         configuration.boxA = [d, a, b, c];
         let { left, right, top, bottom } = configuration.cropBounds;
@@ -354,6 +472,11 @@
     }
 
     function restart() {
+        if (mode === MODE_ORTHO_A) {
+            configuration.segments = [];
+            resetCrop();
+            return;
+        }
         configuration.boxA = [
             [0.1, 0.1],
             [0.9, 0.1],
@@ -372,6 +495,25 @@
         [imgSrcA, imgSrcB] = [imgSrcB, imgSrcA];
         [configuration.boxA, configuration.boxB] = [configuration.boxB, configuration.boxA];
         // updateOriginCanvas(imageA);
+    }
+
+    /** Crosshair guidelines over the output canvas (positions in px relative to .canvas-preview) */
+    let guide = $state(null);
+    function onPreviewMove(e) {
+        if (!canvasOutput) return (guide = null);
+        const r = canvasOutput.getBoundingClientRect();
+        const pr = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - r.left,
+            y = e.clientY - r.top;
+        if (x < 0 || y < 0 || x > r.width || y > r.height) return (guide = null);
+        guide = {
+            x: e.clientX - pr.left,
+            y: e.clientY - pr.top,
+            left: r.left - pr.left,
+            top: r.top - pr.top,
+            width: r.width,
+            height: r.height
+        };
     }
 
     let imgBOpacity = $state(0.5);
@@ -404,6 +546,15 @@
                 </li>
 
                 <li class="nav-item">
+                    <a class="nav-link" class:active-tab={mode == MODE_ORTHO_A} onclick={() => (mode = MODE_ORTHO_A)} href="javascript:void(0)">
+                        Orthogonalize <LetterCircle --back-color="var(--img-a)">A</LetterCircle>
+                        <Icon icon="grid-3x3" class="tab-icon" />
+                        <Icon icon="arrow-right" />
+                        <Icon icon="grid-3x3-gap" class="tab-icon" />
+                    </a>
+                </li>
+
+                <li class="nav-item">
                     <a
                         class="nav-link"
                         class:active-tab={mode == MODE_A_TO_B}
@@ -429,7 +580,18 @@
     </div>
 
     <div class="bar bg-dark text-white gap-3">
-        <Btn onclick={restart} icon="bounding-box-circles">Reset control points</Btn>
+        {#if mode === MODE_ORTHO_A}
+            <Btn onclick={restart} icon="eraser">Clear segments</Btn>
+            {#if effectiveConfiguration?.ortho}
+                {@const o = effectiveConfiguration.ortho}
+                <span class="badge bg-secondary fw-normal" title="Residual angle between each transformed segment and its axis">
+                    {configuration.segments.length} segments · error rms
+                    <b>{o.rmsError.toFixed(2)}°</b> · max <b>{o.maxError.toFixed(2)}°</b>
+                </span>
+            {/if}
+        {:else}
+            <Btn onclick={restart} icon="bounding-box-circles">Reset control points</Btn>
+        {/if}
 
         {#if effectiveConfiguration?.cropBox && hasCropBox}
             <Btn onclick={resetCrop} icon="textarea">Reset crop box</Btn>
@@ -454,6 +616,28 @@
                     <label class={'btn btn-sm btn-outline-' + (configuration.forceResolution ? 'primary' : 'secondary')} for={'btnradio' + res}>{res}X</label>
                 {/each}
             </div>
+
+            {#if mode === MODE_ORTHO_A}
+                <div class="d-flex align-items-center gap-2">
+                    Aspect ×:
+                    <input
+                        type="number"
+                        class="form-control form-control-sm"
+                        style="width: 90px"
+                        min="0.01"
+                        max="100"
+                        step="0.05"
+                        title="x/y scale factor applied after orthogonalization. Empty = estimated from the vanishing points (needs both families to converge)"
+                        placeholder={effectiveConfiguration?.ortho?.estimatedAspectRatio ? effectiveConfiguration.ortho.estimatedAspectRatio.toFixed(2) : '1 (n/a)'}
+                        bind:value={configuration.orthoAspectRatio}
+                    />
+                </div>
+
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="imageAOrtho" bind:checked={configuration.transformEntireImage} />
+                    <label class="form-check-label" for="imageAOrtho">Entire image</label>
+                </div>
+            {/if}
 
             {#if mode === MODE_STRAIGHTEN_A}
                 <div class="d-flex align-items-center gap-3">
@@ -503,13 +687,25 @@
                     <span class="badge bg-dark mr-2">{configuration.imageA.width}x{configuration.imageA.height}</span>
                 </div>
 
-                <PicWithPoints
-                    bind:box={configuration.boxA}
-                    cropBox={effectiveConfiguration?.cropBox}
-                    hideCropBox={!hasCropBox}
-                    {onCropBoxChange}
-                    src={imgSrcA}
-                />
+                {#if mode === MODE_ORTHO_A}
+                    <PicWithSegments
+                        bind:segments={configuration.segments}
+                        families={effectiveConfiguration?.ortho?.families || []}
+                        errors={effectiveConfiguration?.ortho?.errors || []}
+                        cropBox={effectiveConfiguration?.cropBox}
+                        hideCropBox={false}
+                        {onCropBoxChange}
+                        src={imgSrcA}
+                    />
+                {:else}
+                    <PicWithPoints
+                        bind:box={configuration.boxA}
+                        cropBox={effectiveConfiguration?.cropBox}
+                        hideCropBox={!hasCropBox}
+                        {onCropBoxChange}
+                        src={imgSrcA}
+                    />
+                {/if}
             {:else if error}
                 <div class="alert alert-danger m-4">
                     {error}
@@ -531,7 +727,12 @@
                 <span class="badge bg-dark"> {Math.round(effectiveConfiguration.destWidth)}x{Math.round(effectiveConfiguration.destHeight)}</span>
             </div>
 
-            <div class="canvas-preview">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="canvas-preview" onmousemove={onPreviewMove} onmouseleave={() => (guide = null)}>
+                {#if guide}
+                    <div class="guide guide-h" style:top={guide.y + 'px'} style:left={guide.left + 'px'} style:width={guide.width + 'px'}></div>
+                    <div class="guide guide-v" style:left={guide.x + 'px'} style:top={guide.top + 'px'} style:height={guide.height + 'px'}></div>
+                {/if}
                 {#if mode === MODE_A_TO_B && configuration.imageB && configuration.boxB}
                     <img src={imgSrcB} class="imgSrcB" alt="Source B" />
                     <canvas style:opacity={imgBOpacity} bind:this={canvasOutput}></canvas>
@@ -670,6 +871,21 @@
         position: absolute;
     }
 
+    .guide {
+        position: absolute;
+        pointer-events: none;
+        z-index: 2;
+        background: #0de9fd;
+        box-shadow: 0 0 3px 1px rgba(0, 0, 0, 0.7);
+        mix-blend-mode: normal;
+    }
+    .guide-h {
+        height: 1px;
+    }
+    .guide-v {
+        width: 1px;
+    }
+
     .imgSrcB {
         position: absolute;
         /*z-index: 1;*/
@@ -678,6 +894,16 @@
 
     .bg-purple {
         background: #d1c3ea;
+    }
+
+    .nav-link :global(.tab-icon) {
+        display: inline-block;
+        width: 24px;
+        height: 24px;
+        line-height: 24px;
+        font-size: 18px;
+        text-align: center;
+        vertical-align: middle;
     }
 
     .nav-item .active-tab.nav-link {
